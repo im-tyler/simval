@@ -144,12 +144,36 @@ def validate(run_dir, case: ReferenceCase | str, *, selection: str | None = None
     if isinstance(case, str):
         from simval.oracle.cases import get_case
         case = get_case(case)
+    run = Path(run_dir)
+    from simval.context import select_engine
+    run_engine = select_engine(run).name
+    if case.engine and case.engine != run_engine:
+        return DiagnosticResult(
+            name="reference_oracle",
+            passed=False,
+            threshold=0.0,
+            value=0.0,
+            detail={
+                "case": case.name,
+                "run_engine": run_engine,
+                "case_engine": case.engine,
+                "error": f"domain mismatch: run is '{run_engine}', case is '{case.engine}'",
+                "n_checked": 0, "n_failed": 0, "metrics": {}, "candidate_metrics": {},
+            },
+        )
     sel = selection or case.selection
     candidate = compute_metrics(run_dir, selection=sel)
     compared = compare_metrics(candidate, case.reference_metrics, case.tolerances)
     passed = compared.pop("__passed__")
     n_checked = len(compared)
     n_failed = sum(1 for v in compared.values() if not v["passed"])
+    if n_checked == 0:
+        passed = False
+        compared["_domain_mismatch"] = {
+            "reference_metrics": sorted(case.reference_metrics),
+            "candidate_metrics": sorted(candidate),
+            "note": "no overlapping metrics despite matching engine",
+        }
     detail = {
         "case": case.name,
         "selection": sel,

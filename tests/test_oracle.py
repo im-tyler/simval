@@ -40,6 +40,16 @@ def test_validate_unknown_case_raises():
         validate(".", "nonexistent_case_xyz")
 
 
+def test_validate_cross_domain_mismatch_fails(tmp_path):
+    run = tmp_path / "adk"
+    run.mkdir()
+    shutil.copy(datafiles.XTC, run / "traj.xtc")
+    shutil.copy(datafiles.GRO, run / "conf.gro")
+    result = validate(run, "kepler_two_body")  # MD run vs N-body case
+    assert result.passed is False
+    assert result.detail["n_checked"] == 0
+
+
 def test_validate_adk_self_match(tmp_path):
     run = tmp_path / "adk"
     run.mkdir()

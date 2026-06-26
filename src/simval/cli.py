@@ -25,6 +25,10 @@ def main(argv=None) -> int:
     d.add_argument("--out", default="provenance.json")
     d.add_argument("--selection", default="protein", help="MDAnalysis selection (default: protein)")
 
+    ins = sub.add_parser("inspect", help="show engine + what a run-dir contains (no checks)")
+    ins.add_argument("run_dir")
+    ins.add_argument("--selection", default="protein")
+
     v = sub.add_parser("validate", help="compare a run against a stored reference case (oracle)")
     v.add_argument("run_dir")
     v.add_argument("--case", required=True)
@@ -57,6 +61,20 @@ def main(argv=None) -> int:
             flag = "PASS" if r["passed"] else "FAIL"
             print(f"  [{flag}] {r['name']:<24} value={r['value']:.4g} threshold={r['threshold']:.4g}")
         return 0 if verdict == "pass" else 1
+
+    if args.cmd == "inspect":
+        from simval import service
+        snap = _safe(lambda: service.inspect(args.run_dir, selection=args.selection))
+        if snap is None:
+            return 1
+        print(f"simval {__version__} | engine: {snap['engine']} | selection: {snap['selection']}")
+        for k, v in snap["has"].items():
+            print(f"  {'has' if v else 'no '}  {k}")
+        if snap.get("metadata"):
+            ff = snap["metadata"].get("force_field") or "-"
+            wm = snap["metadata"].get("water_model") or "-"
+            print(f"  force_field={ff}  water={wm}")
+        return 0
 
     if args.cmd == "cases":
         from simval.oracle import list_cases

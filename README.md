@@ -77,3 +77,7 @@ Pre-alpha, no users yet. Phase 1 = plain-MD verification + provenance + oracle, 
 ## License
 
 MIT (simval core). The verification layer invokes solvers **arm's-length** (subprocess / container / MCP) and does not link them, so wrapping GPL solvers (GROMACS, OpenFOAM) does not propagate copyleft — this is what keeps a future paid layer legal (PLAN §11). Upstream solvers keep their own licenses.
+
+## Security
+
+simval's current scope is **RCE-free**: it reads simulation output files and runs internal numeric code (numpy / REBOUND / a built-in FDTD). It does not execute untrusted code, and the web dashboard is local-first (`127.0.0.1`) reading user-supplied paths. The audit's Critical RCE finding (A7) applied to the original `bpy` + agent-generated-code vision — that risk materializes **only if** an agent layer is added that runs LLM-generated code; at that point it requires the audit's mitigations (sandboxed/rootless containers, `--network=none --read-only`, digest-pinned images, **human approval before any generated code runs**, MCP tool output treated as untrusted). Not present today; gated with the agent layer.
