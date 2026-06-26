@@ -173,12 +173,11 @@ R1–R4, R7 stand. **Rewritten / added:**
 
 Phase 0 is **folded into Phase 1** (AUDIT A12). No separate research phase.
 
-- **Phase 1 — Thin slice, GROMACS MD, 2–3 wk timebox, kill-by date in §10.**
-  Build order (diagnostics-first — proves the moat before any agent/UI work):
-  1. Diagnostics library (§1.7 Tier 1): energy drift, RMSD/Rg plateau + equilibration, FF parameter coverage, unit consistency. Tested against synthetic good/bad fixtures (no GROMACS needed).
-  2. Provenance manifest (params, diagnostics, hashes, verdict) + human sign-off hook (Tier 2).
-  3. CLI harness: `simval diagnose <run-dir>` → report + manifest.
-  4. *Only then:* GROMACS MCP server + Docker + one ReAct agent + notebook UI.
+- **Phase 1 — Thin slice, GROMACS MD.** Build order (diagnostics-first — proves the moat before any agent/UI work):
+  1. ~~Diagnostics library (§1.7 Tier 1): energy drift, RMSD plateau + equilibration, FF parameter coverage, param/unit sanity~~ — **DONE 2026-06-26** (34 tests, numpy-only).
+  2. ~~Provenance manifest (params, diagnostics, hashes, verdict) + Tier-2 sign-off hook~~ — **DONE 2026-06-26** (`simval.provenance.v1`).
+  3. ~~CLI harness: `simval diagnose <run-dir>` → report + manifest~~ — **DONE 2026-06-26**.
+  4. *Next:* GROMACS MCP server + Docker + one ReAct agent + notebook UI. Needs real `.xtc/.edr` + MDAnalysis adapter wiring.
 
   **Phase-1 exit criterion:** a target user completes a real weekly task unaided; **the diagnostics flag a deliberately-broken run as failed while passing a sane one**; the user exports a reproducible bundle (Tier-2 sign-off included).
 
@@ -232,6 +231,7 @@ GROMACS (LGPL/GPL), Blender (GPLv3), OpenFOAM (GPLv3) are copyleft. **The plan's
 
 ## Changelog
 
-- **v0.3** — post-audit. Applied all 14 §C edits from AUDIT.md. Scope narrowed to GROMACS MD for one user (D1); creative cut (A1). Greenfield Python (D2). Cloud LLM Phase 1 (D3). Verification split into Tier 1 (deterministic, buildable — the headline) + Tier 2 (human sign-off) (D4, §1.7). Phase 0 folded into Phase 1 with 2–3 wk timebox + kill criterion (D5, §10). Name reopened (D6); working package name `simval`. Deleted: MCP Gateway/Registry, 5-agent graph, K8s, USD-for-MD, Validator agent. Added: §1.5 user, §1.6 existence proof, §1.7 verification tiers, §2.5 competitive landscape, §10 kill criterion, §11 licensing. R6 rewritten (drop USD for MD); R9 added (license audit). Diagnostics-first build order inside Phase 1.
+- **v0.3** — post-audit. Applied all 14 §C edits from AUDIT.md. Scope narrowed to GROMACS MD for one user (D1); creative cut (A1). Greenfield Python (D2). Cloud LLM Phase 1 (D3). Verification split into Tier 1 (deterministic, buildable — the headline) + Tier 2 (human sign-off) (D4, §1.7). Phase 0 folded into Phase 1 with 2–3 wk timebox + kill criterion (D5, §10). Name reopened (D6); working package name `simval`. Deleted: MCP Gateway/Registry, 5-agent graph, K8s, USD-for-MD, Validator agent. Added: §1.5 user, §1.6 existence proof, §1.7 verification tiers, §2.5 competitive landscape, §10 shelve criteria, §11 licensing. R6 rewritten (drop USD for MD); R9 added (license audit). Diagnostics-first build order inside Phase 1.
+- **v0.3a (2026-06-26)** — kill date removed per Tyler (§10 → shelve criteria only). Phase-1 diagnostics slice **shipped**: 5 Tier-1 checks (energy drift, RMSD plateau, equilibration/ESS, FF coverage, param/unit sanity) + provenance manifest (`simval.provenance.v1`) + `simval diagnose` CLI. 34 tests passing. Criterion 1 of §10 met.
 - **v0.2** — naming decided: Omnilator. (Reopened in v0.3 — D6.)
 - **v0.1** — initial draft.
