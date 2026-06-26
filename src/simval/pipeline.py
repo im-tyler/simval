@@ -9,6 +9,7 @@ from simval.diagnostics import prep as prep_mod
 from simval.diagnostics import rmsd as rmsd_mod
 from simval.diagnostics import rmsf as rmsf_mod
 from simval import nbody  # noqa: F401  (registers ReboundEngine + exposes n-body checks)
+from simval import wave  # noqa: F401  (registers WaveEngine + exposes wave checks)
 from simval.manifest import build_manifest, write_manifest
 
 
@@ -49,6 +50,11 @@ def run_checks(ctx: RunContext) -> list:
         results.append(nbody.check_angular_momentum(ctx.extra["L_magnitude"]))
     if "com" in ctx.extra:
         results.append(nbody.check_com_drift(ctx.extra["com"]))
+
+    if "cfl" in ctx.extra:
+        results.append(wave.check_cfl(ctx.extra["cfl"]))
+        results.append(wave.check_wave_energy(
+            ctx.extra["wave_energy"], src_on_index=ctx.extra.get("src_on_index", 0)))
 
     return results
 

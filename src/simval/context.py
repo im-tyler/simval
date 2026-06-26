@@ -181,6 +181,10 @@ def _load_optional_engines() -> None:
         import simval.nbody  # noqa: F401  (registers ReboundEngine if rebound installed)
     except Exception:
         pass
+    try:
+        import simval.wave  # noqa: F401  (registers WaveEngine; numpy-only)
+    except Exception:
+        pass
 
 
 def register_engine(adapter: EngineAdapter) -> None:
