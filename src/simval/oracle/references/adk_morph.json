@@ -1,0 +1,19 @@
+{
+  "name": "adk_morph",
+  "description": "Adenylate kinase conformational-morph trajectory (MDAnalysisTests). Real recorded structure; reference for atom-count/Rg/RMSD-profile invariants.",
+  "engine": "gromacs",
+  "force_field": "oplsaa",
+  "selection": "protein and name CA",
+  "reference_metrics": {
+    "n_frames": 10,
+    "n_selected_atoms": 214,
+    "mean_rmsd_nm": 1.514258130368622,
+    "final_rmsd_nm": 2.600390386840955,
+    "rmsd_tail_drift_fraction": 0.5919477509995429,
+    "mean_rg_nm": 2.2363474369049072,
+    "final_rg_nm": 2.0080413818359375
+  },
+  "tolerances": {},
+  "source": "MDAnalysisTests.datafiles (adk_oplsaa.{gro,xtc})",
+  "source_hash": "64684e9b45de9619"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "lysozyme_nvt_30ps",
+  "description": "Hen lysozyme (1AKI), amber99sb-ildn + TIP3P, energy-minimized + 30ps NVT (our pipeline). Real dynamics; reference for short-NVT invariants.",
+  "engine": "gromacs",
+  "force_field": "amber99sb-ildn",
+  "selection": "protein and name CA",
+  "reference_metrics": {
+    "n_frames": 151,
+    "n_selected_atoms": 129,
+    "mean_rmsd_nm": 0.22966909920158368,
+    "final_rmsd_nm": 0.3338230092151445,
+    "rmsd_tail_drift_fraction": 0.284961441038534,
+    "mean_rg_nm": 1.3994897603988647,
+    "final_rg_nm": 1.396359920501709,
+    "energy_relative_range": 0.01417887871791164
+  },
+  "tolerances": {},
+  "source": "pipeline/runs/lysozyme (gmx 2026.3, 2026-06-26)",
+  "source_hash": "9aef2d00ae738297"
+}

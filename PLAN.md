@@ -89,6 +89,21 @@ These are category judgments, not computations. Force fields are empirical fits 
 
 ---
 
+## 1.8 The durable build — reference-oracle (decided 2026-06-26)
+
+Strategic anchor: build for the future by accumulating assets that **don't depreciate** as AI improves — not by scaffolding the largest version now (which depreciates).
+
+- **Durable (compound as AI improves):** canonical reference datasets (known-good outputs per benchmark case); a validation oracle future agents call to verify their sim code; users/distribution/trust.
+- **Depreciating (rebuilt by future AI):** hand-written scaffolding, glue, orchestration, any "largest-scale" structure committed to under today's capabilities.
+
+**The build:** a **reference-oracle for MD.** Canonical benchmark cases carry stored reference *metrics* (computed once from known-good trajectories, versioned as JSON — not the huge raw trajectories). An API — `validate(run, case) -> pass/fail + per-metric deltas` — lets an agent (or human) building/improving an MD integrator check whether their output reproduces the known-good result within tolerance. Reuses simval's diagnostics to compute candidate metrics. This is the agent-loop teacher: an LLM with no oracle hallucinates plausible-wrong physics; an LLM with a reference oracle gets told "your RMSD drifts 8% from the known-good — fix it."
+
+Extends domain-by-domain as bandwidth + real users justify (CFD, EM later; frontier excluded — no reference data without the supercomputer). **Alanine-dipeptide canonical benchmark** is the first proper reference case to add (rich published data).
+
+Units shipped this iteration: `oracle/cases.py` (ReferenceCase registry), `oracle/validate.py` (`compute_metrics` + pure `compare_metrics` + `validate`), `references/*.json` (AdK + lysozyme snapshots), `simval validate <run-dir> --case <name>`.
+
+---
+
 ## 2. Why now — honest enablers and honest blockers
 
 **Enablers (real, as of mid-2026)**
@@ -255,5 +270,6 @@ GROMACS (LGPL/GPL), Blender (GPLv3), OpenFOAM (GPLv3) are copyleft. **The plan's
 - **v0.3b (2026-06-26)** — **real-data bridge**: MDAnalysis adapter (`simval/io.py`) reads real GROMACS `.xtc`/`.tpr`/`.gro`/`.xvg`. Verified on a real adenylate kinase trajectory — tool returns the scientifically correct verdict (rejects a 10-frame conformational morph as non-equilibrated). Selection+alignment (the PBC/water gotcha) encoded in the adapter. 43 tests. `[gromacs]` optional dep added.
 - **v0.3c (2026-06-26)** — **real GROMACS execution**: native `gmx` 2026.3 + 1AKI/amber99sb-ildn pipeline (`pipeline/`) producing real dynamics (38,392 atoms, 30ps NVT). `Dockerfile` + `run.sh` define the containerized recipe (A7 boundary). Tool runs end-to-end on real `.xtc`/`.gro`/`.xvg` and correctly flags the un-equilibrated run. Two refinements filed: NVT→conserved-energy for drift; `.gro`-first topology (tpx v138 skew).
 - **v0.3d (2026-06-26)** — **user-proxy roadmap reorder**: §1.5.1 added (scientist-persona review). Pivot away from commoditized agent/UI toward methods/provenance extract + prep-sanity (the layers the named user would actually pilot). FEP/ΔΔG explicitly deferred to Phase 3 (months, gated on user + domain partner). Claim-scoping: "structural equilibration," never ΔG convergence.
+- **v0.3e (2026-06-26)** — **the durable build (§1.8)**: reference-oracle for MD. Canonical benchmark cases with stored reference metrics + `validate(run, case)` API — the agent-loop teacher that compounds as AI improves. Reframed "build for the future" as accumulate-durable-assets, not scaffold-largest-now. Charge/protonation prep check shipped earlier this session now folds into the prep-sanity family.
 - **v0.2** — naming decided: Omnilator. (Reopened in v0.3 — D6.)
 - **v0.1** — initial draft.
