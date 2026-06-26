@@ -18,6 +18,8 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
     engine = select_engine(run)
     if engine.name == "nbody-rebound":
         return _nbody_metrics(run)
+    if engine.name == "wave-fdtd":
+        return _wave_metrics(run)
     return _md_metrics(run, selection)
 
 
@@ -71,6 +73,21 @@ def _nbody_metrics(run: Path) -> dict:
         "energy_relative_range": e_rel,
         "angular_momentum_relative_range": L_rel,
         "com_drift_max": com_drift,
+    }
+
+
+def _wave_metrics(run: Path) -> dict:
+    import json
+
+    from simval.wave import check_wave_energy, integrate_wave
+
+    cfg = json.loads((run / "wave.json").read_text())
+    data = integrate_wave(cfg)
+    growth = check_wave_energy(data["energy"], src_on_index=data["src_on"] // 4)
+    return {
+        "cfl": float(data["cfl"]),
+        "energy_growth": float(growth.value),
+        "n_steps": int(data["n_steps"]),
     }
 
 
