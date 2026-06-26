@@ -70,9 +70,9 @@ def production_duration_ps(mdp: dict) -> str:
 
 def render_methods(meta: dict) -> str:
     m = meta.get("mdp", {})
-    ff = meta.get("force_field") or "the selected force field"
-    water = meta.get("water_model") or "the selected water model"
-    gmx = f"GROMACS {meta['gmx_version']}" if meta.get("gmx_version") else "GROMACS"
+    ff = meta.get("force_field") or "an unspecified force field"
+    water = meta.get("water_model") or "an unspecified water model"
+    gmx = f"GROMACS {meta['gmx_version']}" if meta.get("gmx_version") else "the engine"
     integrator = m.get("integrator", "md")
     dt = m.get("dt", "?")
     constraints = m.get("constraints", "none")

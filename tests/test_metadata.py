@@ -43,4 +43,4 @@ def test_render_methods_handles_nve():
             "force_field": None, "water_model": None, "gmx_version": None}
     s = M.render_methods(meta)
     assert "NVE" in s
-    assert "the selected force field" in s
+    assert "an unspecified force field" in s
