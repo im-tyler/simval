@@ -55,7 +55,12 @@ def cases() -> list[str]:
     return list_cases()
 
 
+def compare_runs(run_a, run_b, *, selection: str = "protein and name CA") -> dict:
+    from simval.compare import compare_runs as _cmp
+    return _cmp(run_a, run_b, selection=selection)
+
+
 __all__ = [
     "list_engines", "engine_for", "inspect",
-    "diagnose_run", "validate_run", "cases",
+    "diagnose_run", "validate_run", "cases", "compare_runs",
 ]

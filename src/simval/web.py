@@ -44,6 +44,11 @@ def validate(run_dir: str, case: str, selection: str | None = None):
     return service.validate_run(run_dir, case, selection=selection)
 
 
+@app.get("/api/compare")
+def compare(run_a: str, run_b: str, selection: str = "protein and name CA"):
+    return service.compare_runs(run_a, run_b, selection=selection)
+
+
 _HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>simval</title><meta name="viewport" content="width=device-width,initial-scale=1">

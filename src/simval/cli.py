@@ -22,6 +22,10 @@ def main(argv=None) -> int:
 
     c = sub.add_parser("cases", help="list available reference cases")
     e = sub.add_parser("engines", help="list registered engine adapters")
+    cmp = sub.add_parser("compare", help="compare two runs on key metrics (sweep view)")
+    cmp.add_argument("run_a")
+    cmp.add_argument("run_b")
+    cmp.add_argument("--selection", default="protein and name CA")
 
     args = parser.parse_args(argv)
 
@@ -47,6 +51,16 @@ def main(argv=None) -> int:
         print(f"simval {__version__} | {len(_ENGINES)} engines")
         for eng in _ENGINES:
             print(f"  {eng.name}")
+        return 0
+
+    if args.cmd == "compare":
+        from simval.compare import compare_runs, largest_deltas
+        comp = compare_runs(args.run_a, args.run_b, selection=args.selection)
+        print(f"simval {__version__} | compare {args.run_a}  vs  {args.run_b}")
+        for name, drel in largest_deltas(comp, n=8):
+            a = comp["deltas"][name]["a"]
+            b = comp["deltas"][name]["b"]
+            print(f"  {name:<24} A={a:.4g}  B={b:.4g}  drel={drel:.3g}")
         return 0
 
     if args.cmd == "validate":

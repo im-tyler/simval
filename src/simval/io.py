@@ -45,6 +45,15 @@ def load_atom_names(top, *, selection: str | None = None) -> list[str]:
     return list(grp.names)
 
 
+def load_residue_labels(top, *, selection: str = "protein and name CA") -> list[str]:
+    """Per-atom residue labels like 'ALA17' for the given selection (one per atom)."""
+    import MDAnalysis as mda
+
+    u = mda.Universe(str(top))
+    grp = u.select_atoms(selection)
+    return [f"{r.resname}{r.resnum}" for r in grp.residues]
+
+
 def load_energy_xvg(path, *, column: int | None = 1):
     """Parse a GROMACS xmgrace .xvg energy file.
 

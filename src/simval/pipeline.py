@@ -7,6 +7,7 @@ from simval.diagnostics import energy, equilibration, ff_coverage
 from simval.diagnostics import params as params_mod
 from simval.diagnostics import prep as prep_mod
 from simval.diagnostics import rmsd as rmsd_mod
+from simval.diagnostics import rmsf as rmsf_mod
 from simval.manifest import build_manifest, write_manifest
 
 
@@ -23,6 +24,10 @@ def run_checks(ctx: RunContext) -> list:
         rseries = rmsd_mod.rmsd_over_time(ctx.positions, ctx.reference)
         results.append(rmsd_mod.check_rmsd_plateau(ctx.positions, ctx.reference))
         results.append(equilibration.check_equilibration(rseries))
+
+    if ctx.ca_positions is not None and ctx.ca_reference is not None:
+        results.append(rmsf_mod.check_rmsf(
+            ctx.ca_positions, ctx.ca_reference, labels=ctx.ca_labels))
 
     if ctx.system_atom_types is not None and ctx.ff_param_types is not None:
         results.append(ff_coverage.check_ff_coverage(ctx.system_atom_types, ctx.ff_param_types))

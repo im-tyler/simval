@@ -21,6 +21,9 @@ class RunContext:
     positions: np.ndarray | None = None
     reference: np.ndarray | None = None
     atom_names: list[str] | None = None
+    ca_positions: np.ndarray | None = None
+    ca_reference: np.ndarray | None = None
+    ca_labels: list[str] | None = None
     energy: np.ndarray | None = None
     structure_path: Path | None = None
     tpr_path: Path | None = None
@@ -110,6 +113,12 @@ class GromacsEngine(EngineAdapter):
             ctx.positions, ctx.reference, ctx.atom_names = io.load_trajectory(xtc, top, selection=selection)
             ctx.run_params["n_frames"] = int(ctx.positions.shape[0])
             ctx.run_params["n_selected_atoms"] = int(ctx.positions.shape[1])
+            try:
+                ctx.ca_positions, ctx.ca_reference, _ = io.load_trajectory(
+                    xtc, top, selection="protein and name CA")
+                ctx.ca_labels = io.load_residue_labels(top)
+            except Exception:
+                pass
 
         ctx.tpr_path = _find(run, "*.tpr")
         if ctx.tpr_path is not None:
