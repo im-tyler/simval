@@ -6,8 +6,9 @@ import pytest
 pytest.importorskip("MDAnalysis")
 datafiles = pytest.importorskip("MDAnalysisTests.datafiles")
 
-from simval.cli import diagnose, main
+from simval.cli import main
 from simval.manifest import load_manifest
+from simval.pipeline import diagnose
 
 
 def _write_stable_xvg(path, n=200, seed=0):

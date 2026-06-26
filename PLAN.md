@@ -102,6 +102,16 @@ Extends domain-by-domain as bandwidth + real users justify (CFD, EM later; front
 
 Units shipped this iteration: `oracle/cases.py` (ReferenceCase registry), `oracle/validate.py` (`compute_metrics` + pure `compare_metrics` + `validate`), `references/*.json` (AdK + lysozyme snapshots), `simval validate <run-dir> --case <name>`.
 
+### 1.8.1 Extension architecture — the "ultimate-ready" seams (2026-06-26)
+
+The base is built to absorb expansion without rewriting the core. Two stable ports:
+
+- **`EngineAdapter` (`simval/context.py`)** — a new physics domain implements `detect(run)` + `load_context(run) -> RunContext`. `GromacsEngine` and `SyntheticEngine` ship now; a future `FluidEngine` / `NBodyEngine` / `OpenMMEngine` registers via `register_engine()` and is immediately discoverable (`simval engines`, `service.list_engines()`). *The port is what's built; the future domains are not pre-instantiated* — that would be the omni-fantasy in code form.
+- **`service.py`** — the stable API (`inspect`, `diagnose_run`, `validate_run`, `cases`, `list_engines`). Any future UI (full SPA, notebook, agent) sits on this and never touches pipeline internals.
+- **`web.py`** — a thin local-first FastAPI dashboard (`pip install simval[web]`; `simval-web`). Proves the service API is UI-agnostic; replaceable by a real frontend without core changes.
+
+Layering: `engines → pipeline.run_checks(ctx) → manifest` / `oracle.validate`. Checks read from a `RunContext`; adding a check is one branch in `run_checks`; adding a domain is an `EngineAdapter` + that domain's checks reading `ctx.extra`. A plugin test (`test_new_domain_plugs_in_via_adapter`) proves the seam. **Discipline holds:** this is interfaces, not implementations of unbuilt domains.
+
 ---
 
 ## 2. Why now — honest enablers and honest blockers
@@ -271,5 +281,6 @@ GROMACS (LGPL/GPL), Blender (GPLv3), OpenFOAM (GPLv3) are copyleft. **The plan's
 - **v0.3c (2026-06-26)** — **real GROMACS execution**: native `gmx` 2026.3 + 1AKI/amber99sb-ildn pipeline (`pipeline/`) producing real dynamics (38,392 atoms, 30ps NVT). `Dockerfile` + `run.sh` define the containerized recipe (A7 boundary). Tool runs end-to-end on real `.xtc`/`.gro`/`.xvg` and correctly flags the un-equilibrated run. Two refinements filed: NVT→conserved-energy for drift; `.gro`-first topology (tpx v138 skew).
 - **v0.3d (2026-06-26)** — **user-proxy roadmap reorder**: §1.5.1 added (scientist-persona review). Pivot away from commoditized agent/UI toward methods/provenance extract + prep-sanity (the layers the named user would actually pilot). FEP/ΔΔG explicitly deferred to Phase 3 (months, gated on user + domain partner). Claim-scoping: "structural equilibration," never ΔG convergence.
 - **v0.3e (2026-06-26)** — **the durable build (§1.8)**: reference-oracle for MD. Canonical benchmark cases with stored reference metrics + `validate(run, case)` API — the agent-loop teacher that compounds as AI improves. Reframed "build for the future" as accumulate-durable-assets, not scaffold-largest-now. Charge/protonation prep check shipped earlier this session now folds into the prep-sanity family.
+- **v0.3f (2026-06-26)** — **extension architecture (§1.8.1)**: `EngineAdapter` port + `service.py` stable API + thin `web.py` FastAPI dashboard. Diagnose refactored to engine→context→checks (data-driven, no behavior change). Proven seams: a fake fluid domain registers and is discovered; UI endpoints serve. 70 tests. "Ultimate-ready" = interfaces, not pre-built empty domains.
 - **v0.2** — naming decided: Omnilator. (Reopened in v0.3 — D6.)
 - **v0.1** — initial draft.

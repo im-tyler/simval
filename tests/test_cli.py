@@ -1,6 +1,7 @@
-from simval.cli import diagnose, main
+from simval.cli import main
 from simval.fixtures import make_run_dir
 from simval.manifest import load_manifest
+from simval.pipeline import diagnose
 
 
 def test_good_run_dir_passes(tmp_path):

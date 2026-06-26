@@ -11,10 +11,12 @@ dependencies = ["numpy>=1.24"]
 
 [project.scripts]
 simval = "simval.cli:main"
+simval-web = "simval.web:run"
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "httpx>=0.26"]
 gromacs = ["MDAnalysis>=2.7"]
+web = ["fastapi>=0.110", "uvicorn>=0.27"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
