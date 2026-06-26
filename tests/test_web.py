@@ -23,6 +23,12 @@ def test_api_engines_and_cases():
     assert "adk_morph" in cases
 
 
+def test_bad_input_returns_400_not_500():
+    client = TestClient(app)
+    r = client.get("/api/inspect?run_dir=/tmp/simval_does_not_exist_xyz")
+    assert r.status_code == 400
+
+
 def test_api_series_and_compare(tmp_path):
     import shutil
 

@@ -4,13 +4,21 @@ touching the core. Optional dep: pip install 'simval[web]'."""
 from __future__ import annotations
 
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from simval import __version__
 from simval import service
 
 app = FastAPI(title="simval", version=__version__)
+
+
+def _run(fn):
+    """Wrap a service call so a bad run-dir/case returns HTTP 400, not 500."""
+    try:
+        return fn()
+    except (FileNotFoundError, ValueError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -30,28 +38,28 @@ def cases():
 
 @app.get("/api/inspect")
 def inspect(run_dir: str, selection: str = "protein"):
-    return service.inspect(run_dir, selection=selection)
+    return _run(lambda: service.inspect(run_dir, selection=selection))
 
 
 @app.post("/api/diagnose")
 def diagnose(run_dir: str, selection: str = "protein", out: str = "provenance.json"):
-    return service.diagnose_run(run_dir, selection=selection, out=out)
+    return _run(lambda: service.diagnose_run(run_dir, selection=selection, out=out))
 
 
 @app.post("/api/validate")
 def validate(run_dir: str, case: str, selection: str | None = None):
-    return service.validate_run(run_dir, case, selection=selection)
+    return _run(lambda: service.validate_run(run_dir, case, selection=selection))
 
 
 @app.get("/api/compare")
 def compare(run_a: str, run_b: str, selection: str = "protein and name CA"):
-    return service.compare_runs(run_a, run_b, selection=selection)
+    return _run(lambda: service.compare_runs(run_a, run_b, selection=selection))
 
 
 @app.get("/api/series")
 def series(run_dir: str, selection: str = "protein and name CA"):
     from simval.viz import series_for
-    return series_for(run_dir, selection=selection)
+    return _run(lambda: series_for(run_dir, selection=selection))
 
 
 _HTML = """<!doctype html>

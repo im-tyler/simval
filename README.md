@@ -33,6 +33,16 @@ pip install -e '.[dev]'                # pytest + httpx
 
 GROMACS itself is needed only to *produce* runs (`brew install gromacs`); simval reads its outputs.
 
+## Thresholds
+
+Defaults are starting points, not physics — a flexible loop and a rigid pocket need different RMSD ceilings. Override per-check either with a `thresholds.json` in the run-dir or via `--thresholds overrides.json`:
+
+```json
+{"energy_drift": 0.02, "rmsd_plateau": 0.15, "per_residue_rmsf": 0.35}
+```
+
+Each check records the threshold it actually used in its `DiagnosticResult` (and thus the manifest), so a verdict is always traceable to the thresholds in force. See `src/simval/thresholds.py` for the full default table.
+
 ## CLI
 
 ```

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from simval import __version__
 from simval.pipeline import diagnose as run_diagnose
@@ -24,6 +25,7 @@ def main(argv=None) -> int:
     d.add_argument("run_dir")
     d.add_argument("--out", default="provenance.json")
     d.add_argument("--selection", default="protein", help="MDAnalysis selection (default: protein)")
+    d.add_argument("--thresholds", default=None, help="path to a JSON of per-check threshold overrides")
 
     ins = sub.add_parser("inspect", help="show engine + what a run-dir contains (no checks)")
     ins.add_argument("run_dir")
@@ -52,7 +54,12 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "diagnose":
-        manifest = _safe(lambda: run_diagnose(args.run_dir, out=args.out, selection=args.selection))
+        overrides = None
+        if args.thresholds:
+            import json
+            overrides = json.loads(Path(args.thresholds).read_text())
+        manifest = _safe(lambda: run_diagnose(
+            args.run_dir, out=args.out, selection=args.selection, thresholds=overrides))
         if manifest is None:
             return 1
         verdict = manifest["verdict"]
