@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "simval"
 version = "0.1.0"
 description = "Deterministic verification + reference-oracle for computational physics (MD, N-body, waves). Local-first, LLM-free core."
+license = "MIT"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
 
@@ -14,7 +16,7 @@ simval = "simval.cli:main"
 simval-web = "simval.web:run"
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "httpx>=0.26"]
+dev = ["pytest>=7", "httpx>=0.26", "MDAnalysisTests>=2.7"]
 gromacs = ["MDAnalysis>=2.7"]
 nbody = ["rebound>=3.27"]
 web = ["fastapi>=0.110", "uvicorn>=0.27"]

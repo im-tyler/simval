@@ -63,3 +63,7 @@ The core is local + LLM-free (verification must be deterministic). The optional 
 ## Status
 
 Pre-alpha, no users yet. Phase 1 = plain-MD verification + provenance + oracle, with the multi-domain port proven. FEP/ΔΔG (the core pharma deliverable) is Phase 3 — a separate, months-long investment gated on a real user + domain partner. See PLAN §7.
+
+## License
+
+MIT (simval core). The verification layer invokes solvers **arm's-length** (subprocess / container / MCP) and does not link them, so wrapping GPL solvers (GROMACS, OpenFOAM) does not propagate copyleft — this is what keeps a future paid layer legal (PLAN §11). Upstream solvers keep their own licenses.
