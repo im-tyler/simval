@@ -1,0 +1,53 @@
+{
+  "created_at": "2026-06-26T20:59:54+00:00",
+  "diagnostics": [
+    {
+      "detail": {
+        "drift_over_run": 4.493293064974949e-16,
+        "mean_energy": -0.0005004995004995003,
+        "metric": "relative_range",
+        "n_samples": 200,
+        "n_window": 180,
+        "relative_range": 1.083120134389212e-15,
+        "skip_fraction": 0.1,
+        "slope_per_step": 1.2493838525654615e-21
+      },
+      "name": "energy_drift",
+      "passed": true,
+      "threshold": 0.01,
+      "value": 1.083120134389212e-15
+    },
+    {
+      "detail": {
+        "mean": 0.0009990009990009992,
+        "relative_range": 4.341145498627613e-16
+      },
+      "name": "angular_momentum",
+      "passed": true,
+      "threshold": 0.0001,
+      "value": 4.341145498627613e-16
+    },
+    {
+      "detail": {
+        "final_drift": 4.660244809914951e-18,
+        "max_drift": 4.660244809914951e-18
+      },
+      "name": "com_drift",
+      "passed": true,
+      "threshold": 0.001,
+      "value": 4.660244809914951e-18
+    }
+  ],
+  "files": {},
+  "image_digest": null,
+  "notes": "",
+  "params": {
+    "domain": "celestial-mechanics",
+    "engine": "nbody-rebound",
+    "n_samples": 200
+  },
+  "schema": "simval.provenance.v1",
+  "simval_version": "0.0.1",
+  "tier2_signed_off": false,
+  "verdict": "pass"
+}

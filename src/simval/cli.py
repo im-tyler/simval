@@ -47,10 +47,11 @@ def main(argv=None) -> int:
         return 0
 
     if args.cmd == "engines":
-        from simval.context import _ENGINES
-        print(f"simval {__version__} | {len(_ENGINES)} engines")
-        for eng in _ENGINES:
-            print(f"  {eng.name}")
+        from simval import service
+        names = service.list_engines()
+        print(f"simval {__version__} | {len(names)} engines")
+        for name in names:
+            print(f"  {name}")
         return 0
 
     if args.cmd == "compare":

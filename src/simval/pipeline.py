@@ -8,6 +8,7 @@ from simval.diagnostics import params as params_mod
 from simval.diagnostics import prep as prep_mod
 from simval.diagnostics import rmsd as rmsd_mod
 from simval.diagnostics import rmsf as rmsf_mod
+from simval import nbody  # noqa: F401  (registers ReboundEngine + exposes n-body checks)
 from simval.manifest import build_manifest, write_manifest
 
 
@@ -43,6 +44,11 @@ def run_checks(ctx: RunContext) -> list:
 
     if ctx.params is not None:
         results.append(params_mod.check_params(ctx.params))
+
+    if "L_magnitude" in ctx.extra:
+        results.append(nbody.check_angular_momentum(ctx.extra["L_magnitude"]))
+    if "com" in ctx.extra:
+        results.append(nbody.check_com_drift(ctx.extra["com"]))
 
     return results
 

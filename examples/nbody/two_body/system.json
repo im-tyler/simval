@@ -1,0 +1,9 @@
+{
+  "G": 1.0,
+  "dt": 0.001,
+  "tmax": 20.0,
+  "bodies": [
+    {"mass": 1.0,    "position": [0, 0, 0], "velocity": [0, 0, 0]},
+    {"mass": 0.001,  "position": [1, 0, 0], "velocity": [0, 1, 0]}
+  ]
+}

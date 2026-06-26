@@ -33,6 +33,7 @@ class RunContext:
     metadata: dict[str, Any] = field(default_factory=dict)
     run_params: dict[str, Any] = field(default_factory=dict)
     skipped: dict[str, str] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 def _find(run: Path, *patterns: str):
