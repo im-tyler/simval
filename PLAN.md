@@ -177,9 +177,11 @@ Phase 0 is **folded into Phase 1** (AUDIT A12). No separate research phase.
   1. ~~Diagnostics library (§1.7 Tier 1): energy drift, RMSD plateau + equilibration, FF parameter coverage, param/unit sanity~~ — **DONE 2026-06-26** (34 tests, numpy-only).
   2. ~~Provenance manifest (params, diagnostics, hashes, verdict) + Tier-2 sign-off hook~~ — **DONE 2026-06-26** (`simval.provenance.v1`).
   3. ~~CLI harness: `simval diagnose <run-dir>` → report + manifest~~ — **DONE 2026-06-26**.
-  4. *Next:* GROMACS MCP server + Docker + one ReAct agent + notebook UI. Needs real `.xtc/.edr` + MDAnalysis adapter wiring.
-     - **MDAnalysis adapter DONE 2026-06-26** (`simval/io.py`): reads real `.xtc`/`.tpr`/`.gro`/`.xvg`; protein-selection + Å→nm conversion (the PBC/water gotcha that naive RMSD gets wrong). 43 tests passing incl. real AdK trajectory.
-     - Remaining: containerize GROMACS execution (produce our own real dynamics, not just consume existing trajectories) → MCP server → ReAct agent → notebook UI.
+  4. *Next:* GROMACS MCP server + one ReAct agent + notebook UI.
+     - **MDAnalysis adapter DONE 2026-06-26** (`simval/io.py`): reads real `.xtc`/`.tpr`/`.gro`/`.xvg`; protein-selection + Å→nm conversion (the PBC/water gotcha that naive RMSD gets wrong).
+     - **Real GROMACS pipeline DONE 2026-06-26** (`pipeline/`): 1AKI lysozyme, amber99sb-ildn + tip3p, energy-minimized + 30ps NVT, 38,392 atoms. Native `gmx` 2026.3 (brew); `Dockerfile` + `run.sh` define the containerized recipe (`--network=none --read-only`, A7 boundary). Tool validated on real dynamics — **correctly refuses to false-pass an un-equilibrated run**.
+     - **Findings (refinements filed):** (i) energy_drift on NVT *total* energy is the wrong observable (thermostat exchanges energy) → default to conserved-energy (gmx term 13) or NVE; (ii) GROMACS 2026 `tpx v138` .tpr unreadable by MDAnalysis 2.10 → use `.gro` for topology, `.tpr` best-effort for atom types.
+     - Remaining: MCP server → ReAct agent → notebook UI.
 
   **Phase-1 exit criterion:** a target user completes a real weekly task unaided; **the diagnostics flag a deliberately-broken run as failed while passing a sane one**; the user exports a reproducible bundle (Tier-2 sign-off included).
 
@@ -236,5 +238,6 @@ GROMACS (LGPL/GPL), Blender (GPLv3), OpenFOAM (GPLv3) are copyleft. **The plan's
 - **v0.3** — post-audit. Applied all 14 §C edits from AUDIT.md. Scope narrowed to GROMACS MD for one user (D1); creative cut (A1). Greenfield Python (D2). Cloud LLM Phase 1 (D3). Verification split into Tier 1 (deterministic, buildable — the headline) + Tier 2 (human sign-off) (D4, §1.7). Phase 0 folded into Phase 1 with 2–3 wk timebox + kill criterion (D5, §10). Name reopened (D6); working package name `simval`. Deleted: MCP Gateway/Registry, 5-agent graph, K8s, USD-for-MD, Validator agent. Added: §1.5 user, §1.6 existence proof, §1.7 verification tiers, §2.5 competitive landscape, §10 shelve criteria, §11 licensing. R6 rewritten (drop USD for MD); R9 added (license audit). Diagnostics-first build order inside Phase 1.
 - **v0.3a (2026-06-26)** — kill date removed per Tyler (§10 → shelve criteria only). Phase-1 diagnostics slice **shipped**: 5 Tier-1 checks (energy drift, RMSD plateau, equilibration/ESS, FF coverage, param/unit sanity) + provenance manifest (`simval.provenance.v1`) + `simval diagnose` CLI. 34 tests passing. Criterion 1 of §10 met.
 - **v0.3b (2026-06-26)** — **real-data bridge**: MDAnalysis adapter (`simval/io.py`) reads real GROMACS `.xtc`/`.tpr`/`.gro`/`.xvg`. Verified on a real adenylate kinase trajectory — tool returns the scientifically correct verdict (rejects a 10-frame conformational morph as non-equilibrated). Selection+alignment (the PBC/water gotcha) encoded in the adapter. 43 tests. `[gromacs]` optional dep added.
+- **v0.3c (2026-06-26)** — **real GROMACS execution**: native `gmx` 2026.3 + 1AKI/amber99sb-ildn pipeline (`pipeline/`) producing real dynamics (38,392 atoms, 30ps NVT). `Dockerfile` + `run.sh` define the containerized recipe (A7 boundary). Tool runs end-to-end on real `.xtc`/`.gro`/`.xvg` and correctly flags the un-equilibrated run. Two refinements filed: NVT→conserved-energy for drift; `.gro`-first topology (tpx v138 skew).
 - **v0.2** — naming decided: Omnilator. (Reopened in v0.3 — D6.)
 - **v0.1** — initial draft.

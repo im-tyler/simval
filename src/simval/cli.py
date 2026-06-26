@@ -78,7 +78,7 @@ def _diagnose_gromacs(run: Path, *, out: str, selection: str) -> dict:
     results = []
     run_params: dict = {"engine": "gromacs", "selection": selection}
 
-    top = _find(run, "*.tpr", "*.gro", "*.pdb")
+    top = _find(run, "*.gro", "*.pdb", "*.tpr")
     xtc = _find(run, "*.xtc")
     if top and xtc:
         positions, reference, _names = io.load_trajectory(xtc, top, selection=selection)
@@ -89,8 +89,9 @@ def _diagnose_gromacs(run: Path, *, out: str, selection: str) -> dict:
         run_params["n_selected_atoms"] = int(positions.shape[1])
         run_params["mean_rmsd_nm"] = float(rseries[1:].mean()) if rseries.size > 1 else 0.0
 
-    if top and str(top).endswith(".tpr"):
-        types = io.load_atom_types(top, selection=selection)
+    tpr = _find(run, "*.tpr")
+    if tpr:
+        types = io.load_atom_types(tpr, selection=selection)
         ff_path = run / "ff_atom_types.txt"
         if types and ff_path.exists():
             ff_atoms = [l.strip() for l in ff_path.read_text().splitlines() if l.strip()]

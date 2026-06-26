@@ -25,12 +25,13 @@ def load_trajectory(xtc, top, *, selection: str = "protein"):
 
 
 def load_atom_types(top, *, selection: str = "protein") -> list[str]:
-    """Force-field atom types from a topology that carries them (e.g. .tpr)."""
-    import MDAnalysis as mda
-
-    u = mda.Universe(str(top))
-    grp = u.select_atoms(selection) if selection else u.atoms
+    """Force-field atom types from a topology that carries them (e.g. .tpr).
+    Returns [] if the topology can't be parsed (e.g. tpx version skew)."""
     try:
+        import MDAnalysis as mda
+
+        u = mda.Universe(str(top))
+        grp = u.select_atoms(selection) if selection else u.atoms
         return list(grp.types)
     except Exception:
         return []

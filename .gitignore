@@ -8,9 +8,16 @@ build/
 dist/
 .DS_Store
 workspace/
+pipeline/runs/
 *.xtc
 *.trr
 *.edr
 *.gro
 *.top
-*.mdp
+*.tpr
+*.xvg
+*.cpt
+*.log
+*.xpm
+*.ndx
+*.itp
