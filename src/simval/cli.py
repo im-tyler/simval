@@ -122,6 +122,11 @@ def _diagnose_gromacs(run: Path, *, out: str, selection: str) -> dict:
     if struct:
         results.append(prep_mod.check_box_cutoff(struct, rcoulomb=1.0))
         results.append(prep_mod.check_steric_clashes(struct))
+        if tpr:
+            try:
+                results.append(prep_mod.check_charge_state(struct, tpr_path=tpr))
+            except Exception as e:
+                run_params["charge_state_skipped"] = str(e)[:160]
 
     params_path = run / "params.json"
     if params_path.exists():

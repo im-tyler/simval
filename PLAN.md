@@ -193,7 +193,7 @@ Phase 0 is **folded into Phase 1** (AUDIT A12). No separate research phase.
 
    **Build queue (reordered 2026-06-26 by §1.5.1 user-proxy — commoditized layer deprioritized):**
    5. **Methods/provenance auto-extract** — `.mdp`/`.top` → structured provenance + rendered methods paragraph. The #1 wedge, near-free. *(next)*
-   6. **Prep-sanity checks** — box-vs-cutoff (PME minimum-image), steric clashes. Protonation/net-charge deferred (needs FF-charge parsing).
+   6. **Prep-sanity checks** — box-vs-cutoff (PME minimum-image), steric clashes, **charge-state/neutralization (gmx-dump net charge + His-tautomer inventory)** — **DONE 2026-06-26**. Caught a real bug in our own pipeline (missing `genion` → +8 unneutralized system → PME artifact risk); pipeline fixed. Protonation-state *correctness* remains Tier-2 (human reviews the surfaced His tautomers).
    7. **Honest claim-scoping + configurable thresholds** — "structural equilibration" (never imply ΔG convergence); system-aware threshold defaults.
    8. *Gate:* a real user conversation (§1.5.1 / AUDIT E.2) before the commoditized layer.
    9. **Commoditized layer (only past the gate):** MCP server → ReAct agent → notebook UI. This is the 60–70% the free composite already ships — do not over-invest (A13, A12).

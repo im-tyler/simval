@@ -1,6 +1,98 @@
 from __future__ import annotations
 
+import re
+
 from simval.result import DiagnosticResult
+
+_ION_CHARGES = {
+    "NA": 1, "NA+": 1, "K": 1, "CA": 2, "MG": 2, "ZN": 2, "FE": 2,
+    "CL": -1, "CL-": -1, "BR": -1, "F": -1,
+}
+
+_ATOM_CHARGE = re.compile(r"atom\[\s*\d+\s*\]=\{[^}]*?\bq=\s*([-+0-9.eE]+)")
+
+
+def parse_net_charge(dump_text: str) -> float:
+    qs = _ATOM_CHARGE.findall(dump_text)
+    if not qs:
+        raise ValueError("no atom charges parsed from gmx dump output")
+    return float(sum(float(q) for q in qs))
+
+
+def net_charge_from_tpr(tpr_path) -> float:
+    import subprocess
+
+    out = subprocess.run(
+        ["gmx", "dump", "-s", str(tpr_path)],
+        capture_output=True, text=True, timeout=180,
+    )
+    return parse_net_charge(out.stdout)
+
+
+def ion_inventory(u) -> tuple[dict, float]:
+    counts: dict[str, int] = {}
+    total = 0.0
+    for resname, q in _ION_CHARGES.items():
+        n = u.select_atoms(f"resname {resname}").n_residues
+        if n:
+            counts[resname] = n
+            total += q * n
+    return counts, float(total)
+
+
+def his_tautomer_inventory(u) -> dict:
+    from collections import Counter
+
+    c: Counter = Counter()
+    for r in u.select_atoms("resname HIS").residues:
+        names = set(r.atoms.names)
+        hd1, he2 = "HD1" in names, "HE2" in names
+        label = "HIP" if (hd1 and he2) else "HID" if hd1 else "HIE" if he2 else "deprot"
+        c[label] += 1
+    return dict(c)
+
+
+def check_charge_state(
+    structure_path,
+    *,
+    tpr_path=None,
+    net_charge: float | None = None,
+    tol: float = 0.5,
+) -> DiagnosticResult:
+    """System net charge + neutralization + His-tautomer transparency.
+
+    Pass when the total system (incl. counterions) is approximately neutral;
+    otherwise flag a PME net-charge artifact risk. His tautomers are reported
+    for human review (pdb2gmx assigns them silently) — not pass/fail (Tier 2)."""
+    import MDAnalysis as mda
+
+    u = mda.Universe(str(structure_path))
+    if net_charge is None:
+        if tpr_path is None:
+            raise ValueError("either net_charge or tpr_path must be provided")
+        net_charge = net_charge_from_tpr(tpr_path)
+
+    ions, ion_charge = ion_inventory(u)
+    his = his_tautomer_inventory(u)
+    protein_charge = float(net_charge) - ion_charge
+    passed = abs(float(net_charge)) <= tol
+
+    return DiagnosticResult(
+        name="charge_state",
+        passed=passed,
+        threshold=float(tol),
+        value=float(abs(net_charge)),
+        detail={
+            "system_net_charge_e": float(net_charge),
+            "ion_charge_e": float(ion_charge),
+            "non_ion_charge_e": float(protein_charge),
+            "neutralized": bool(passed),
+            "ions": ions,
+            "his_tautomers": his,
+            "tol_e": float(tol),
+            "note": "unneutralized systems cause PME net-charge artifacts; His tautomers need Tier-2 review",
+        },
+    )
 
 
 def check_box_cutoff(structure_path, *, rcoulomb: float = 1.0, min_ratio: float = 2.0) -> DiagnosticResult:
