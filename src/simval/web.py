@@ -49,64 +49,94 @@ def compare(run_a: str, run_b: str, selection: str = "protein and name CA"):
     return service.compare_runs(run_a, run_b, selection=selection)
 
 
+@app.get("/api/series")
+def series(run_dir: str, selection: str = "protein and name CA"):
+    from simval.viz import series_for
+    return series_for(run_dir, selection=selection)
+
+
 _HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>simval</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
- body{font:14px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#222}
- h1{font-size:1.4rem} label{display:block;margin:.6rem 0 .15rem;color:#444}
+ body{font:14px/1.5 -apple-system,system-ui,sans-serif;max-width:1000px;margin:1.5rem auto;padding:0 1rem;color:#222}
+ h1{font-size:1.3rem} label{display:block;margin:.6rem 0 .15rem;color:#444}
  input,button,select{font:inherit;padding:.35rem .5rem;border:1px solid #bbb;border-radius:4px}
  button{background:#1a1a1a;color:#fff;border-color:#1a1a1a;cursor:pointer;margin-right:.4rem}
  button.alt{background:#fff;color:#1a1a1a}
- pre{background:#f5f5f5;padding:.8rem;border-radius:4px;overflow:auto;max-height:420px}
+ pre{background:#f5f5f5;padding:.6rem;border-radius:4px;overflow:auto;max-height:240px;font-size:12px}
  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
- .pass{color:#080}.fail{color:#a00}
+ .cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+ .card{background:#fafafa;border:1px solid #eee;border-radius:6px;padding:.6rem}
+ canvas{max-width:100%}
 </style></head><body>
-<h1>simval <span style="color:#888;font-weight:normal">deterministic MD verification + reference oracle</span></h1>
+<h1>simval <span style="color:#888;font-weight:normal">verification + reference oracle</span></h1>
 
-<label>Run directory (local path)</label>
-<input id="run" size="60" placeholder="/path/to/run-dir" value="">
+<label>Run directory</label>
+<input id="run" size="70" placeholder="/path/to/run-dir" value="">
 <label>Selection</label>
 <input id="sel" size="40" value="protein and name CA">
 
 <div class="row" style="margin:1rem 0">
- <button onclick="call('inspect')">Inspect</button>
- <button onclick="call('diagnose')">Diagnose</button>
- <button class="alt" onclick="loadCases()">Load cases</button>
+ <button onclick="plot()">Plot</button>
+ <button class="alt" onclick="call('inspect')">Inspect</button>
+ <button class="alt" onclick="call('diagnose')">Diagnose</button>
+ <button class="alt" onclick="loadCases()">Cases</button>
+ <select id="case"></select>
+ <button class="alt" onclick="call('validate')">Validate</button>
 </div>
 
-<label>Reference case</label>
-<div class="row"><select id="case"></select>
- <button class="alt" onclick="call('validate')">Validate vs case</button>
+<div class="cols">
+ <div class="card"><h3>Series</h3>
+  <select id="metric" onchange="renderSeries()"></select>
+  <canvas id="seriesChart" height="200"></canvas>
+ </div>
+ <div class="card"><h3>Orbit (N-body)</h3>
+  <canvas id="orbitChart" height="200"></canvas>
+ </div>
 </div>
 
 <h3>Result</h3>
 <pre id="out">—</pre>
 
 <script>
-async function loadCases(){
-  const r = await (await fetch('/api/cases')).json();
-  const s = document.getElementById('case');
-  s.innerHTML = r.cases.map(c=>`<option>${c}</option>`).join('');
-  show(r);
+let LAST=null, seriesChart=null, orbitChart=null;
+async function loadCases(){const r=await(await fetch('/api/cases')).json();document.getElementById('case').innerHTML=r.cases.map(c=>`<option>${c}</option>`).join('');show(r);}
+async function plot(){
+  const run=document.getElementById('run').value, sel=document.getElementById('sel').value;
+  const r=await(await fetch(`/api/series?run_dir=${encodeURIComponent(run)}&selection=${encodeURIComponent(sel)}`)).json();
+  LAST=r; show(r);
+  const m=document.getElementById('metric'); m.innerHTML=Object.keys(r.series).map(k=>`<option>${k}</option>`).join('');
+  renderSeries(); renderOrbit(r.orbit);
+}
+function renderSeries(){
+  if(!LAST||!LAST.series) return;
+  const key=document.getElementById('metric').value;
+  const data=LAST.series[key]; if(!data) return;
+  if(seriesChart) seriesChart.destroy();
+  seriesChart=new Chart(document.getElementById('seriesChart'),{type:'line',
+    data:{labels:data.map((_,i)=>i),datasets:[{label:key,data,borderColor:'#1a6',borderWidth:1.5,pointRadius:0,tension:.2}]},
+    options:{plugins:{legend:{display:true}},scales:{x:{display:false}},animation:false}});
+}
+function renderOrbit(orbit){
+  if(orbitChart) orbitChart.destroy();
+  const el=document.getElementById('orbitChart');
+  if(!orbit||!orbit.length){ el.getContext('2d').clearRect(0,0,el.width,el.height); return; }
+  const cols=['#1a6','#a36','#06c','#c60','#36a','#6a6'];
+  orbitChart=new Chart(el,{type:'scatter',
+    datasets:orbit.map((o,i)=>({label:'body '+i,data:o.x.map((x,j)=>({x,y:o.y[j]})),borderColor:cols[i%6],borderWidth:1,pointRadius:.4,showLine:true})),
+    options:{plugins:{legend:{display:true}},scales:{x:{title:{display:true,text:'x'}},y:{title:{display:true,text:'y'}}},animation:false}});
 }
 async function call(kind){
-  const run = document.getElementById('run').value;
-  const sel = document.getElementById('sel').value;
-  const cs = document.getElementById('case').value;
-  let url, opt = {};
-  if(kind==='inspect') url = `/api/inspect?run_dir=${encodeURIComponent(run)}&selection=${encodeURIComponent(sel)}`;
-  else if(kind==='diagnose'){ url = `/api/diagnose?run_dir=${encodeURIComponent(run)}&selection=${encodeURIComponent(sel)}`; opt.method='POST'; }
-  else if(kind==='validate'){ url = `/api/validate?run_dir=${encodeURIComponent(run)}&case=${encodeURIComponent(cs)}&selection=${encodeURIComponent(sel)}`; opt.method='POST'; }
-  try{
-    const r = await (await fetch(url, opt)).json();
-    show(r);
-  }catch(e){ show({error: String(e)}); }
+  const run=document.getElementById('run').value, sel=document.getElementById('sel').value, cs=document.getElementById('case').value;
+  let url,opt={};
+  if(kind==='inspect')url=`/api/inspect?run_dir=${encodeURIComponent(run)}&selection=${encodeURIComponent(sel)}`;
+  else if(kind==='diagnose'){url=`/api/diagnose?run_dir=${encodeURIComponent(run)}&selection=${encodeURIComponent(sel)}`;opt.method='POST';}
+  else if(kind==='validate'){url=`/api/validate?run_dir=${encodeURIComponent(run)}&case=${encodeURIComponent(cs)}&selection=${encodeURIComponent(sel)}`;opt.method='POST';}
+  try{show(await(await fetch(url,opt)).json());}catch(e){show({error:String(e)});}
 }
-function show(o){
-  const el = document.getElementById('out');
-  el.textContent = JSON.stringify(o, null, 2);
-}
+function show(o){document.getElementById('out').textContent=JSON.stringify(o,null,2);}
 </script>
 </body></html>
 """

@@ -32,6 +32,9 @@ def integrate_system(system_path, *, samples: int = 200) -> dict:
     energy = np.empty(samples)
     Lmag = np.empty(samples)
     com = np.empty((samples, 3))
+    n_bodies = len(sim.particles)
+    n_plot = min(n_bodies, 6)
+    body_xy = np.empty((n_plot, samples, 2))
     for i, t in enumerate(times):
         sim.integrate(t)
         energy[i] = sim.energy()
@@ -48,7 +51,12 @@ def integrate_system(system_path, *, samples: int = 200) -> dict:
             cz += p.m * p.z
         Lmag[i] = float(np.sqrt(lx * lx + ly * ly + lz * lz))
         com[i] = [cx / M, cy / M, cz / M]
-    return {"times": times, "energy": energy, "L_magnitude": Lmag, "com": com}
+        for bi in range(n_plot):
+            body_xy[bi, i] = [ps[bi].x, ps[bi].y]
+    return {
+        "times": times, "energy": energy, "L_magnitude": Lmag,
+        "com": com, "body_xy": body_xy, "n_bodies": n_bodies,
+    }
 
 
 def check_angular_momentum(L, *, threshold: float = 1e-4) -> DiagnosticResult:
@@ -90,11 +98,14 @@ class ReboundEngine(EngineAdapter):
             "L_magnitude": data["L_magnitude"],
             "com": data["com"],
             "times": data["times"],
+            "body_xy": data["body_xy"],
+            "n_bodies": data["n_bodies"],
         }
         ctx.run_params = {
             "engine": self.name,
             "n_samples": int(data["energy"].size),
             "domain": "celestial-mechanics",
+            "n_bodies": int(data["n_bodies"]),
         }
         return ctx
 
