@@ -20,6 +20,6 @@ cp nvt.xtc traj.xtc
 cp nvt.tpr topol.tpr
 cp nvt.gro conf.gro
 
-rm -f box.gro solv.gro em.gro em.edr em.log em.tpr em.trr nvt.gro nvt.edr nvt.cpt nvt.trr nvt.log mdout.mdp posre.itp state.cpt
+rm -f box.gro solv.gro em.gro em.edr em.log em.tpr em.trr nvt.gro nvt.edr nvt.cpt nvt.trr nvt.log posre.itp state.cpt
 echo "canonical run-dir ready at: $OUT"
 ls -la "$OUT"

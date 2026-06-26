@@ -63,7 +63,7 @@ def check_equilibration(
     frac_eq = 1.0 - (eq_idx / s.size)
     passed = (ess >= min_ess) and (frac_eq >= min_fraction_equilibrated)
     return DiagnosticResult(
-        name="equilibration",
+        name="structural_equilibration",
         passed=bool(passed),
         threshold=float(min_ess),
         value=float(ess),
@@ -73,5 +73,6 @@ def check_equilibration(
             "fraction_equilibrated": float(frac_eq),
             "min_fraction_equilibrated": float(min_fraction_equilibrated),
             "n_samples": int(s.size),
+            "scope": "structural equilibration only; NOT thermodynamic/free-energy convergence",
         },
     )

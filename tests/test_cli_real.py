@@ -36,7 +36,7 @@ def test_real_gromacs_dir_diagnosed(tmp_path):
     assert manifest["params"]["engine"] == "gromacs"
     assert manifest["params"]["n_selected_atoms"] > 0
     names = {d["name"] for d in manifest["diagnostics"]}
-    assert {"rmsd_plateau", "equilibration", "energy_drift"} <= names
+    assert {"rmsd_plateau", "structural_equilibration", "energy_drift"} <= names
     loaded = load_manifest(run / "provenance.json")
     assert loaded["files"]
 
@@ -46,7 +46,7 @@ def test_adk_morph_correctly_fails_plateau(tmp_path):
     manifest = diagnose(run, selection="protein and name CA")
     by_name = {d["name"]: d for d in manifest["diagnostics"]}
     assert by_name["rmsd_plateau"]["passed"] is False
-    assert by_name["equilibration"]["passed"] is False
+    assert by_name["structural_equilibration"]["passed"] is False
     assert manifest["verdict"] == "fail"
 
 

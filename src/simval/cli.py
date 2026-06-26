@@ -7,10 +7,24 @@ from pathlib import Path
 import numpy as np
 
 from simval import __version__
+from simval import metadata as meta_mod
 from simval.diagnostics import energy, equilibration, ff_coverage, params as params_mod
+from simval.diagnostics import prep as prep_mod
 from simval.diagnostics import rmsd as rmsd_mod
 from simval.manifest import build_manifest, write_manifest
 from simval.units import Quantity
+
+
+def _gmx_version() -> str | None:
+    import subprocess
+    try:
+        out = subprocess.run(["gmx", "--version"], capture_output=True, text=True, timeout=10)
+        for ln in out.stdout.splitlines():
+            if ln.strip().startswith("GROMACS version:"):
+                return ln.split(":", 1)[1].strip()
+    except Exception:
+        return None
+    return None
 
 
 def _load_npy(run: Path, name: str):
@@ -104,6 +118,11 @@ def _diagnose_gromacs(run: Path, *, out: str, selection: str) -> dict:
         results.append(energy.check_energy_drift(e))
         run_params["n_energy_samples"] = int(e.size)
 
+    struct = _find(run, "*.gro", "*.pdb")
+    if struct:
+        results.append(prep_mod.check_box_cutoff(struct, rcoulomb=1.0))
+        results.append(prep_mod.check_steric_clashes(struct))
+
     params_path = run / "params.json"
     if params_path.exists():
         raw = json.loads(params_path.read_text())
@@ -111,9 +130,17 @@ def _diagnose_gromacs(run: Path, *, out: str, selection: str) -> dict:
         results.append(params_mod.check_params(qparams))
         run_params["params"] = raw
 
-    artifact_files = [f for f in (xtc, top, xvg) if f]
+    mdp = _find(run, "mdout.mdp", "*.mdp")
+    top_top = _find(run, "*.top")
+    meta = meta_mod.build_metadata(mdp, top_top, gmx_version=_gmx_version())
+    run_params["force_field"] = meta["force_field"]
+    run_params["water_model"] = meta["water_model"]
+
+    artifact_files = [f for f in (xtc, top, xvg, struct, mdp, top_top) if f]
     files = [str(f) for f in artifact_files]
     manifest = build_manifest(run_params, results, files=files, image_digest=None)
+    manifest["metadata"] = meta
+    manifest["methods"] = meta_mod.render_methods(meta)
     write_manifest(manifest, run / out)
     return manifest
 

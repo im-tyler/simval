@@ -41,6 +41,17 @@
 
 **What NL is for:** a novice onboarding feature and a sweep-setup accelerator — **not** the expert's primary control surface. Experts want determinism; NL+LLM breaks it (AUDIT A2, A3).
 
+### 1.5.1 User-interview proxy (scientist persona, 2026-06-26) — drives §7 reorder
+
+A pharma comp-chemist persona review (14 questions) produced one load-bearing finding and the build queue. Recorded here so the roadmap is traceable to the user, not to preference.
+
+- **FEP is the actual pharma deliverable; plain-MD verification is the foundation it rests on.** Binding ΔΔG (FEP/TI, BAR/MBAR convergence) is what lead-opt pays for; simval has 0% of that today. Honest fork: chase FEP (months, scope explosion, needs domain depth Tyler lacks — A12) OR own the plain-MD foundation. **Scoping choice: Phase 1 = the plain-MD verification + provenance/methods utility a pharma modeler runs *alongside* their FEP stack.** FEP/ΔΔG → Phase 3+, a separate investment gated on a real user + domain partner.
+- **Methods-section auto-extract is the #1 wedge and is near-free.** Every parameter for a methods paragraph lives in `.mdp`/`.top`. Emitted as structured provenance + a rendered paragraph. Modelers hand-type this 50×/yr.
+- **Prep-sanity (box/cutoff, clashes) is buildable now; protonation/net-charge needs FF-charge parsing (deferred).** These catch the expensive mistakes (wrong box → PME image artifacts; clashes → unphysical).
+- **Claim scoping:** "structural equilibration" ≠ "thermodynamic/free-energy convergence." RMSD plateau certifies the former, never imply the latter.
+- **Cloud-LLM is a hard gate for regulated pharma.** Reframe: the *verification core is local + LLM-free* (selling point). The optional NL/agent layer is the only cloud-touching part, and it must be air-gap-able.
+- Adopt verdict: "I'd pilot it in shadow mode today for the provenance/methods extract; I would not yet trust a PASS; I'd ignore NL." That sets the honest bar.
+
 ---
 
 ## 1.6 Existence proof (lead the pitch with the gap)
@@ -177,16 +188,20 @@ Phase 0 is **folded into Phase 1** (AUDIT A12). No separate research phase.
   1. ~~Diagnostics library (§1.7 Tier 1): energy drift, RMSD plateau + equilibration, FF parameter coverage, param/unit sanity~~ — **DONE 2026-06-26** (34 tests, numpy-only).
   2. ~~Provenance manifest (params, diagnostics, hashes, verdict) + Tier-2 sign-off hook~~ — **DONE 2026-06-26** (`simval.provenance.v1`).
   3. ~~CLI harness: `simval diagnose <run-dir>` → report + manifest~~ — **DONE 2026-06-26**.
-  4. *Next:* GROMACS MCP server + one ReAct agent + notebook UI.
-     - **MDAnalysis adapter DONE 2026-06-26** (`simval/io.py`): reads real `.xtc`/`.tpr`/`.gro`/`.xvg`; protein-selection + Å→nm conversion (the PBC/water gotcha that naive RMSD gets wrong).
-     - **Real GROMACS pipeline DONE 2026-06-26** (`pipeline/`): 1AKI lysozyme, amber99sb-ildn + tip3p, energy-minimized + 30ps NVT, 38,392 atoms. Native `gmx` 2026.3 (brew); `Dockerfile` + `run.sh` define the containerized recipe (`--network=none --read-only`, A7 boundary). Tool validated on real dynamics — **correctly refuses to false-pass an un-equilibrated run**.
-     - **Findings (refinements filed):** (i) energy_drift on NVT *total* energy is the wrong observable (thermostat exchanges energy) → default to conserved-energy (gmx term 13) or NVE; (ii) GROMACS 2026 `tpx v138` .tpr unreadable by MDAnalysis 2.10 → use `.gro` for topology, `.tpr` best-effort for atom types.
-     - Remaining: MCP server → ReAct agent → notebook UI.
+   4. **Real-data + execution DONE 2026-06-26.** MDAnalysis adapter (`simval/io.py`); real GROMACS pipeline (`pipeline/`: 1AKI/amber99sb-ildn, 38,392 atoms, em+30ps NVT, native `gmx` 2026.3 + `Dockerfile` A7 boundary). Validated on real dynamics — correctly refuses to false-pass an un-equilibrated run.
+      - *Findings:* (i) NVT total energy ≠ drift observable → use conserved-energy/NVE; (ii) tpx v138 `.tpr` skew → `.gro`-first topology.
 
-  **Phase-1 exit criterion:** a target user completes a real weekly task unaided; **the diagnostics flag a deliberately-broken run as failed while passing a sane one**; the user exports a reproducible bundle (Tier-2 sign-off included).
+   **Build queue (reordered 2026-06-26 by §1.5.1 user-proxy — commoditized layer deprioritized):**
+   5. **Methods/provenance auto-extract** — `.mdp`/`.top` → structured provenance + rendered methods paragraph. The #1 wedge, near-free. *(next)*
+   6. **Prep-sanity checks** — box-vs-cutoff (PME minimum-image), steric clashes. Protonation/net-charge deferred (needs FF-charge parsing).
+   7. **Honest claim-scoping + configurable thresholds** — "structural equilibration" (never imply ΔG convergence); system-aware threshold defaults.
+   8. *Gate:* a real user conversation (§1.5.1 / AUDIT E.2) before the commoditized layer.
+   9. **Commoditized layer (only past the gate):** MCP server → ReAct agent → notebook UI. This is the 60–70% the free composite already ships — do not over-invest (A13, A12).
 
-- **Phase 2 — Second vertical + data layer + provenance.** Two tools sharing one pipeline; versioned artifacts. Only after Phase 1 signed off.
-- **Phase 3 — Depth.** Checkpoint/resume, long-run survival, Rerun live, surrogate-model comparison.
+   **Phase-1 exit criterion:** a target user completes a real weekly task unaided; **the diagnostics flag a deliberately-broken run as failed while passing a sane one**; the user exports a reproducible bundle incl. auto-extracted methods (Tier-2 sign-off included).
+
+- **Phase 2 — Second vertical + data layer + sweep registry/compare.**
+- **Phase 3 — Depth + FEP/ΔΔG.** Binding free-energy convergence (BAR/MBAR, FEP overlap, cycle closure), PLUMED/OpenMM interop. **A separate, months-long investment gated on a real user + a domain partner.** This is what makes it a *pharma* tool; Phase 1 is the foundation.
 - **Phase 4 — Ecosystem.** Community tool templates, public registry.
 - **Phase 5 — Intelligence.** Hypothesis generation, auto-optimization.
 
@@ -239,5 +254,6 @@ GROMACS (LGPL/GPL), Blender (GPLv3), OpenFOAM (GPLv3) are copyleft. **The plan's
 - **v0.3a (2026-06-26)** — kill date removed per Tyler (§10 → shelve criteria only). Phase-1 diagnostics slice **shipped**: 5 Tier-1 checks (energy drift, RMSD plateau, equilibration/ESS, FF coverage, param/unit sanity) + provenance manifest (`simval.provenance.v1`) + `simval diagnose` CLI. 34 tests passing. Criterion 1 of §10 met.
 - **v0.3b (2026-06-26)** — **real-data bridge**: MDAnalysis adapter (`simval/io.py`) reads real GROMACS `.xtc`/`.tpr`/`.gro`/`.xvg`. Verified on a real adenylate kinase trajectory — tool returns the scientifically correct verdict (rejects a 10-frame conformational morph as non-equilibrated). Selection+alignment (the PBC/water gotcha) encoded in the adapter. 43 tests. `[gromacs]` optional dep added.
 - **v0.3c (2026-06-26)** — **real GROMACS execution**: native `gmx` 2026.3 + 1AKI/amber99sb-ildn pipeline (`pipeline/`) producing real dynamics (38,392 atoms, 30ps NVT). `Dockerfile` + `run.sh` define the containerized recipe (A7 boundary). Tool runs end-to-end on real `.xtc`/`.gro`/`.xvg` and correctly flags the un-equilibrated run. Two refinements filed: NVT→conserved-energy for drift; `.gro`-first topology (tpx v138 skew).
+- **v0.3d (2026-06-26)** — **user-proxy roadmap reorder**: §1.5.1 added (scientist-persona review). Pivot away from commoditized agent/UI toward methods/provenance extract + prep-sanity (the layers the named user would actually pilot). FEP/ΔΔG explicitly deferred to Phase 3 (months, gated on user + domain partner). Claim-scoping: "structural equilibration," never ΔG convergence.
 - **v0.2** — naming decided: Omnilator. (Reopened in v0.3 — D6.)
 - **v0.1** — initial draft.
