@@ -2,11 +2,9 @@ import json
 import shutil
 from pathlib import Path
 
-import pytest
 
 from simval.wave import WaveEngine, check_cfl, check_wave_energy, integrate_wave
-from simval.oracle import get_case, list_cases, validate
-from simval.oracle.validate import compare_metrics, compute_metrics
+from simval.oracle import validate
 from simval.pipeline import diagnose
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "wave" / "pulse"

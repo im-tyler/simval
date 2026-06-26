@@ -3,7 +3,6 @@ any future UI (notebook, full SPA, agent) replaces this thin layer without
 touching the core. Optional dep: pip install 'simval[web]'."""
 from __future__ import annotations
 
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse

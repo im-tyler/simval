@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from simval.context import RunContext, _ENGINES, select_engine
-from simval.oracle import get_case, list_cases
-from simval.pipeline import diagnose, run_checks
+from simval.context import _ENGINES, select_engine
+from simval.oracle import list_cases
+from simval.pipeline import diagnose
 
 
 def list_engines() -> list[str]:
@@ -45,10 +45,8 @@ def diagnose_run(run_dir, *, selection: str = "protein", out: str = "provenance.
 
 
 def validate_run(run_dir, case: str, *, selection: str | None = None) -> dict:
-    result = get_case(case)
     from simval.oracle import validate as oracle_validate
-    r = oracle_validate(run_dir, case, selection=selection)
-    return r.to_dict()
+    return oracle_validate(run_dir, case, selection=selection).to_dict()
 
 
 def cases() -> list[str]:

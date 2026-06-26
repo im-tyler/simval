@@ -23,3 +23,6 @@ web = ["fastapi>=0.110", "uvicorn>=0.27"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]

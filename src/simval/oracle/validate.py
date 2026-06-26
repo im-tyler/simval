@@ -168,8 +168,5 @@ def validate(run_dir, case: ReferenceCase | str, *, selection: str | None = None
 
 
 def _find(run: Path, *patterns: str):
-    for pat in patterns:
-        hit = next(run.glob(pat), None)
-        if hit:
-            return hit
-    return None
+    from simval._util import find_files
+    return find_files(run, *patterns)

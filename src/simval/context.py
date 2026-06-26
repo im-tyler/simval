@@ -38,11 +38,8 @@ class RunContext:
 
 
 def _find(run: Path, *patterns: str):
-    for pat in patterns:
-        hit = next(run.glob(pat), None)
-        if hit:
-            return hit
-    return None
+    from simval._util import find_files
+    return find_files(run, *patterns)
 
 
 class EngineAdapter:
@@ -83,8 +80,8 @@ class SyntheticEngine(EngineAdapter):
         sys_atoms_p = run / "atom_types.txt"
         ff_p = run / "ff_atom_types.txt"
         if sys_atoms_p.exists() and ff_p.exists():
-            ctx.system_atom_types = [l.strip() for l in sys_atoms_p.read_text().splitlines() if l.strip()]
-            ctx.ff_param_types = [l.strip() for l in ff_p.read_text().splitlines() if l.strip()]
+            ctx.system_atom_types = [line.strip() for line in sys_atoms_p.read_text().splitlines() if line.strip()]
+            ctx.ff_param_types = [line.strip() for line in ff_p.read_text().splitlines() if line.strip()]
             ctx.run_params["n_system_atom_types"] = len(set(ctx.system_atom_types))
 
         params_path = run / "params.json"
@@ -131,7 +128,7 @@ class GromacsEngine(EngineAdapter):
 
         ff_p = run / "ff_atom_types.txt"
         if ff_p.exists():
-            ctx.ff_param_types = [l.strip() for l in ff_p.read_text().splitlines() if l.strip()]
+            ctx.ff_param_types = [line.strip() for line in ff_p.read_text().splitlines() if line.strip()]
 
         ctx.structure_path = _find(run, "*.gro", "*.pdb")
 

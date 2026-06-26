@@ -6,6 +6,16 @@ from simval import __version__
 from simval.pipeline import diagnose as run_diagnose
 
 
+def _safe(fn):
+    """Run an engine/oracle call; on a missing/unrecognized run-dir print a clean
+    error and return None instead of a traceback."""
+    try:
+        return fn()
+    except (FileNotFoundError, ValueError) as e:
+        print(f"simval: error: {e}")
+        return None
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="simval", description="Deterministic MD verification + reference oracle")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -20,8 +30,8 @@ def main(argv=None) -> int:
     v.add_argument("--case", required=True)
     v.add_argument("--selection", default=None)
 
-    c = sub.add_parser("cases", help="list available reference cases")
-    e = sub.add_parser("engines", help="list registered engine adapters")
+    sub.add_parser("cases", help="list available reference cases")
+    sub.add_parser("engines", help="list registered engine adapters")
     cmp = sub.add_parser("compare", help="compare two runs on key metrics (sweep view)")
     cmp.add_argument("run_a")
     cmp.add_argument("run_b")
@@ -38,7 +48,9 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "diagnose":
-        manifest = run_diagnose(args.run_dir, out=args.out, selection=args.selection)
+        manifest = _safe(lambda: run_diagnose(args.run_dir, out=args.out, selection=args.selection))
+        if manifest is None:
+            return 1
         verdict = manifest["verdict"]
         print(f"simval {__version__} | verdict: {verdict.upper()} | {len(manifest['diagnostics'])} checks")
         for r in manifest["diagnostics"]:
@@ -64,7 +76,9 @@ def main(argv=None) -> int:
 
     if args.cmd == "compare":
         from simval.compare import compare_runs, largest_deltas
-        comp = compare_runs(args.run_a, args.run_b, selection=args.selection)
+        comp = _safe(lambda: compare_runs(args.run_a, args.run_b, selection=args.selection))
+        if comp is None:
+            return 1
         print(f"simval {__version__} | compare {args.run_a}  vs  {args.run_b}")
         for name, drel in largest_deltas(comp, n=8):
             a = comp["deltas"][name]["a"]
@@ -112,7 +126,9 @@ def main(argv=None) -> int:
 
     if args.cmd == "validate":
         from simval.oracle import validate as oracle_validate
-        result = oracle_validate(args.run_dir, args.case, selection=args.selection)
+        result = _safe(lambda: oracle_validate(args.run_dir, args.case, selection=args.selection))
+        if result is None:
+            return 1
         verdict = "MATCH" if result.passed else "DRIFT"
         print(f"simval {__version__} | oracle case={args.case} | {verdict} | "
               f"{result.detail['n_checked']} metrics, {result.detail['n_failed']} drifted")
