@@ -27,6 +27,11 @@ def main(argv=None) -> int:
     cmp.add_argument("run_b")
     cmp.add_argument("--selection", default="protein and name CA")
 
+    sw = sub.add_parser("sweep", help="diagnose every run-dir under a folder; tabulate")
+    sw.add_argument("folder")
+    sw.add_argument("--baseline", default=None)
+    sw.add_argument("--selection", default="protein and name CA")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "diagnose":
@@ -62,6 +67,31 @@ def main(argv=None) -> int:
             a = comp["deltas"][name]["a"]
             b = comp["deltas"][name]["b"]
             print(f"  {name:<24} A={a:.4g}  B={b:.4g}  drel={drel:.3g}")
+        return 0
+
+    if args.cmd == "sweep":
+        from simval.sweep import KEY_METRICS, sweep
+        out = sweep(args.folder, selection=args.selection, baseline=args.baseline)
+        print(f"simval {__version__} | sweep {args.folder} | {out['n']} runs")
+        keys = [k for k in KEY_METRICS if any(k in r for r in out["runs"])]
+        hdr = f"  {'run':<20} " + " ".join(f"{k[:14]:>14}" for k in keys)
+        print(hdr)
+        base = out.get("baseline") or {}
+        for r in out["runs"]:
+            if "_error" in r:
+                print(f"  {r['run']:<20}  ERROR: {r['_error']}")
+                continue
+            cells = []
+            for k in keys:
+                v = r.get(k)
+                if v is None:
+                    cells.append(f"{'-':>14}")
+                elif base and k in base:
+                    d = (v - base[k]) / (abs(base[k]) + 1e-12)
+                    cells.append(f"{v:>9.3g}({d:+.0%})")
+                else:
+                    cells.append(f"{v:>14.3g}")
+            print(f"  {r['run']:<20} " + " ".join(cells))
         return 0
 
     if args.cmd == "validate":
