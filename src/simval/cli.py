@@ -32,6 +32,9 @@ def main(argv=None) -> int:
     sw.add_argument("--baseline", default=None)
     sw.add_argument("--selection", default="protein and name CA")
 
+    vm = sub.add_parser("verify-manifest", help="re-hash files; confirm they match a provenance.json")
+    vm.add_argument("manifest")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "diagnose":
@@ -93,6 +96,19 @@ def main(argv=None) -> int:
                     cells.append(f"{v:>14.3g}")
             print(f"  {r['run']:<20} " + " ".join(cells))
         return 0
+
+    if args.cmd == "verify-manifest":
+        from simval.manifest import verify_manifest
+        out = verify_manifest(args.manifest)
+        verdict = "OK" if out["ok"] else "MISMATCH"
+        print(f"simval {__version__} | manifest {verdict} | "
+              f"{len(out['verified'])} verified, {len(out['tampered'])} tampered, {len(out['missing'])} missing "
+              f"(original verdict: {out['verdict']})")
+        for f in out["tampered"]:
+            print(f"  [TAMPERED] {f}")
+        for f in out["missing"]:
+            print(f"  [MISSING]  {f}")
+        return 0 if out["ok"] else 1
 
     if args.cmd == "validate":
         from simval.oracle import validate as oracle_validate

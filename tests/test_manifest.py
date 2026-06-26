@@ -31,3 +31,23 @@ def test_round_trip_with_hashes(tmp_path):
     assert loaded["verdict"] == manifest["verdict"]
     assert str(f) in loaded["files"]
     assert loaded["files"][str(f)] == compute_hashes([f])[str(f)]
+
+
+def test_verify_manifest_detects_tampering(tmp_path):
+    import numpy as np
+
+    f = tmp_path / "energy.npy"
+    np.save(f, good_energy_series())
+    result = check_energy_drift(good_energy_series())
+    manifest = build_manifest({}, [result], files=[f])
+    out = tmp_path / "provenance.json"
+    write_manifest(manifest, out)
+
+    from simval.manifest import verify_manifest
+    ok = verify_manifest(out)
+    assert ok["ok"] is True
+
+    np.save(f, drifting_energy_series())  # tamper
+    tampered = verify_manifest(out)
+    assert tampered["ok"] is False
+    assert tampered["tampered"]

@@ -55,3 +55,21 @@ def write_manifest(manifest: dict, path) -> None:
 
 def load_manifest(path) -> dict:
     return json.loads(Path(path).read_text())
+
+
+def verify_manifest(path) -> dict:
+    """Re-hash every file the manifest references and confirm it still matches.
+    Closes the provenance loop: a manifest is not just written, it can be checked
+    later for tampering or drift."""
+    manifest = load_manifest(path)
+    stored = manifest.get("files", {})
+    out = {"verified": [], "tampered": [], "missing": [], "verdict": manifest.get("verdict")}
+    for rel, expected in stored.items():
+        p = Path(rel)
+        if not p.exists():
+            out["missing"].append(rel)
+            continue
+        actual = compute_hashes([p]).get(rel)
+        (out["verified"] if actual == expected else out["tampered"]).append(rel)
+    out["ok"] = not out["tampered"] and not out["missing"]
+    return out
