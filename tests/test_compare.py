@@ -46,7 +46,6 @@ def test_compare_cross_domain_raises(tmp_path):
     # n-body example dir
     nbody = tmp_path / "nbody"
     nbody.mkdir()
-    import json
     from pathlib import Path
 
     nbody_root = Path(__file__).parent.parent / "examples" / "nbody" / "two_body"
