@@ -10,13 +10,38 @@ _ION_CHARGES = {
 }
 
 _ATOM_CHARGE = re.compile(r"atom\[\s*\d+\s*\]=\{[^}]*?\bq=\s*([-+0-9.eE]+)")
+_MOLTYPE_HDR = re.compile(r"moltype\s+\((\d+)\):")
+_MOLBLOCK = re.compile(
+    r"molblock\s+\(\d+\):(.*?)(?=molblock\s+\(\d+\):|moltype\s+\(\d+\):|bIntermolecular|ffparams)",
+    re.DOTALL,
+)
 
 
 def parse_net_charge(dump_text: str) -> float:
-    qs = _ATOM_CHARGE.findall(dump_text)
-    if not qs:
-        raise ValueError("no atom charges parsed from gmx dump output")
-    return float(sum(float(q) for q in qs))
+    """System net charge = sum over moltypes of (template charge x #molecules).
+    gmx dump lists per-moltype template atoms (with charges) and per-molblock
+    molecule counts; both are required — summing templates alone double-counts
+    ion pairs to zero and misreports a neutralized system."""
+    headers = [(m.start(), m.group(1)) for m in _MOLTYPE_HDR.finditer(dump_text)]
+    if not headers:
+        raise ValueError("no moltype blocks in gmx dump output")
+    headers.append((len(dump_text), None))
+    moltype_q: dict[str, float] = {}
+    for i in range(len(headers) - 1):
+        idx = headers[i][1]
+        chunk = dump_text[headers[i][0]:headers[i + 1][0]]
+        qs = _ATOM_CHARGE.findall(chunk)
+        if qs:
+            moltype_q[idx] = sum(float(q) for q in qs)
+
+    system = 0.0
+    for bm in _MOLBLOCK.finditer(dump_text):
+        block = bm.group(1)
+        mt = re.search(r"moltype\s*=\s*(\d+)", block)
+        nm = re.search(r"#molecules\s*=\s*(\d+)", block)
+        if mt and nm:
+            system += moltype_q.get(mt.group(1), 0.0) * int(nm.group(1))
+    return float(system)
 
 
 def net_charge_from_tpr(tpr_path) -> float:

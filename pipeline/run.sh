@@ -16,7 +16,7 @@ gmx mdrun -deffnm em -nb cpu
 gmx grompp -f "$HERE/nvt.mdp" -c em.gro -p topol.top -o nvt.tpr -maxwarn 2
 gmx mdrun -deffnm nvt -nb cpu -notunepme
 
-printf "12\n0\n" | gmx energy -f nvt.edr -o energy.xvg
+printf "12\n13\n0\n" | gmx energy -f nvt.edr -o energy.xvg
 
 cp nvt.xtc traj.xtc
 cp nvt.tpr topol.tpr

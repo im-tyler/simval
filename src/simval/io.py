@@ -45,6 +45,17 @@ def load_atom_names(top, *, selection: str | None = None) -> list[str]:
     return list(grp.names)
 
 
+def load_preferred_energy(path):
+    """Return (term_name, array) — the conserved-energy column if present
+    (correct for thermostatted/NVT runs), else the first non-time column."""
+    cols = load_energy_xvg(path, column=None)
+    for key in ("Conserved-En.", "Conserved En.", "Conserved-En", "Total-Energy", "Total Energy"):
+        if key in cols:
+            return key, cols[key]
+    name, arr = next((k, v) for k, v in cols.items() if k != "time")
+    return name, arr
+
+
 def load_residue_labels(top, *, selection: str = "protein and name CA") -> list[str]:
     """Per-atom residue labels like 'ALA17' for the given selection (one per atom)."""
     import MDAnalysis as mda

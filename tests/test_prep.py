@@ -39,11 +39,25 @@ def test_clashes_run_on_real_structure():
 
 def test_parse_net_charge():
     dump = (
-        "       qmcharge = 0\n"
-        "            atom[     0]={type=  0, q= 9.66000e-02, qB= 0.0}\n"
-        "            atom[     1]={type=  1, q=-1.03400e+00, qB= 0.0}\n"
+        "   molblock (0):\n"
+        '      moltype              = 0 "Protein"\n'
+        "      #molecules                     = 1\n"
+        "   molblock (1):\n"
+        '      moltype              = 1 "NA"\n'
+        "      #molecules                     = 2\n"
+        "   molblock (2):\n"
+        '      moltype              = 2 "CL"\n'
+        "      #molecules                     = 3\n"
+        "   moltype (0):\n"
+        "      atom[ 0]={q= 1.0}\n"
+        "      atom[ 1]={q= 2.0}\n"
+        "   moltype (1):\n"
+        "      atom[ 0]={q= 1.0}\n"
+        "   moltype (2):\n"
+        "      atom[ 0]={q=-1.0}\n"
     )
-    assert abs(parse_net_charge(dump) - (0.0966 - 1.034)) < 1e-9
+    # protein(+3)*1 + NA(+1)*2 + CL(-1)*3 = 3 + 2 - 3 = 2
+    assert abs(parse_net_charge(dump) - 2.0) < 1e-9
 
 
 def test_his_tautomer_inventory_on_real_structure():
@@ -78,13 +92,13 @@ def test_charge_state_ions_cancel_charge():
                     reason="needs gmx + real lysozyme .tpr")
 def test_net_charge_from_real_tpr():
     q = net_charge_from_tpr(REAL_TPR)
-    assert abs(q - 8.0) < 1e-3
+    assert abs(q) < 1e-2  # neutralized (protein +8, 36 NA, 44 CL)
 
 
 @pytest.mark.skipif(not shutil.which("gmx") or not __import__("os").path.exists(REAL_TPR),
                     reason="needs gmx + real lysozyme .tpr")
-def test_charge_state_flags_unneutralized_lysozyme():
+def test_charge_state_neutralized_lysozyme_passes():
     result = check_charge_state("pipeline/runs/lysozyme/conf.gro", tpr_path=REAL_TPR)
-    assert result.passed is False
-    assert abs(result.detail["system_net_charge_e"] - 8.0) < 1e-3
-    assert result.detail["ions"] == {}
+    assert result.passed is True
+    assert abs(result.detail["system_net_charge_e"]) < 1e-2
+    assert result.detail["ions"]  # NA/CL present

@@ -40,7 +40,8 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
     xvg = _find(run, "*.xvg")
     if xvg:
         from simval.diagnostics import energy as energy_mod
-        e = io.load_energy_xvg(xvg)
+        from simval import io
+        _term, e = io.load_preferred_energy(xvg)
         metrics["energy_relative_range"] = float(energy_mod.check_energy_drift(e).value)
 
     return metrics

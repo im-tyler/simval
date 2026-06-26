@@ -134,7 +134,9 @@ class GromacsEngine(EngineAdapter):
 
         xvg = _find(run, "*.xvg")
         if xvg is not None:
-            ctx.energy = io.load_energy_xvg(xvg)
+            term, arr = io.load_preferred_energy(xvg)
+            ctx.energy = arr
+            ctx.run_params["energy_term"] = term
             ctx.run_params["n_energy_samples"] = int(ctx.energy.size)
 
         params_path = run / "params.json"
