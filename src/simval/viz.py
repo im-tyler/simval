@@ -27,6 +27,9 @@ def series_for(run_dir, *, selection: str = "protein and name CA", max_points: i
         rmsf = per_residue_rmsf(ctx.ca_positions, ctx.ca_reference)
         out["series"]["rmsf_nm"] = rmsf.tolist()
 
+    if "cfl" in ctx.extra:
+        out["series"]["wave_energy"] = _downsample(ctx.extra["wave_energy"], max_points)
+        out["field"] = _downsample_field(ctx.extra.get("field"), max_points)
     if "L_magnitude" in ctx.extra:
         out["series"]["angular_momentum"] = _downsample(ctx.extra["L_magnitude"], max_points)
         out["series"]["com_drift"] = _downsample(
@@ -49,3 +52,17 @@ def _downsample(arr, max_points):
         return a.tolist()
     idx = np.linspace(0, a.size - 1, max_points).astype(int)
     return a[idx].tolist()
+
+
+def _downsample_field(field, max_points):
+    """field: (n_times, nx) -> downsample both axes to keep payload small."""
+    import numpy as np
+    if field is None:
+        return None
+    f = np.asarray(field, dtype=float)
+    if f.ndim != 2:
+        return None
+    nt, nx = f.shape
+    t_idx = np.linspace(0, nt - 1, min(nt, max_points)).astype(int)
+    x_idx = np.linspace(0, nx - 1, min(nx, max_points)).astype(int)
+    return f[t_idx][:, x_idx].tolist()

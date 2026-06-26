@@ -95,6 +95,9 @@ _HTML = """<!doctype html>
  <div class="card"><h3>Orbit (N-body)</h3>
   <canvas id="orbitChart" height="200"></canvas>
  </div>
+ <div class="card" style="grid-column:1/-1"><h3>Field u(x,t) (waves)</h3>
+  <canvas id="fieldCanvas" height="120"></canvas>
+ </div>
 </div>
 
 <h3>Result</h3>
@@ -108,7 +111,7 @@ async function plot(){
   const r=await(await fetch(`/api/series?run_dir=${encodeURIComponent(run)}&selection=${encodeURIComponent(sel)}`)).json();
   LAST=r; show(r);
   const m=document.getElementById('metric'); m.innerHTML=Object.keys(r.series).map(k=>`<option>${k}</option>`).join('');
-  renderSeries(); renderOrbit(r.orbit);
+  renderSeries(); renderOrbit(r.orbit); renderField(r.field);
 }
 function renderSeries(){
   if(!LAST||!LAST.series) return;
@@ -127,6 +130,22 @@ function renderOrbit(orbit){
   orbitChart=new Chart(el,{type:'scatter',
     datasets:orbit.map((o,i)=>({label:'body '+i,data:o.x.map((x,j)=>({x,y:o.y[j]})),borderColor:cols[i%6],borderWidth:1,pointRadius:.4,showLine:true})),
     options:{plugins:{legend:{display:true}},scales:{x:{title:{display:true,text:'x'}},y:{title:{display:true,text:'y'}}},animation:false}});
+}
+function renderField(field){
+  const cv=document.getElementById('fieldCanvas'); const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(!field||!field.length) return;
+  const nt=field.length, nx=field[0].length;
+  let mx=0; for(let i=0;i<nt;i++)for(let j=0;j<nx;j++)mx=Math.max(mx,Math.abs(field[i][j]));
+  mx=mx||1;
+  const w=cv.width=cv.clientWidth||600, h=cv.height;
+  const pix={x:w/nx, y:h/nt};
+  for(let i=0;i<nt;i++)for(let j=0;j<nx;j++){
+    const v=field[i][j]/mx; // -1..1
+    const r=v>0?Math.round(220*v):0, b=v<0?Math.round(-220*v):0, g=40*Math.abs(v);
+    ctx.fillStyle=`rgb(${r},${g},${b})`;
+    ctx.fillRect(j*pix.x,(nt-1-i)*pix.y,Math.ceil(pix.x)+1,Math.ceil(pix.y)+1);
+  }
 }
 async function call(kind){
   const run=document.getElementById('run').value, sel=document.getElementById('sel').value, cs=document.getElementById('case').value;

@@ -6,6 +6,7 @@ datafiles = __import__("pytest").importorskip("MDAnalysisTests.datafiles", reaso
 from simval.viz import series_for
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "nbody" / "two_body"
+WAVE = Path(__file__).parent.parent / "examples" / "wave" / "pulse"
 
 
 def test_md_series(tmp_path):
@@ -28,3 +29,11 @@ def test_nbody_series_has_orbit():
     assert s["orbit"] is not None
     assert len(s["orbit"]) >= 2
     assert set(s["orbit"][0]) == {"x", "y"}
+
+
+def test_wave_series_has_field():
+    s = series_for(WAVE, selection="n/a")
+    assert s["engine"] == "wave-fdtd"
+    assert "wave_energy" in s["series"]
+    assert s["field"] is not None
+    assert isinstance(s["field"], list) and isinstance(s["field"][0], list)

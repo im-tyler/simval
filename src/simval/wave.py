@@ -32,6 +32,7 @@ def integrate_wave(cfg: dict, *, sample_every: int = 4) -> dict:
     cfl2 = cfl * cfl
     energy = []
     times = []
+    fields = []
     step = 0
     with np.errstate(over="ignore", invalid="ignore"):
         while step < n:
@@ -48,12 +49,14 @@ def integrate_wave(cfg: dict, *, sample_every: int = 4) -> dict:
                 pe = 0.5 * (c ** 2) * np.sum(du_dx ** 2) * dx
                 energy.append(float(ke + pe))
                 times.append(step * dt)
+                fields.append(u.copy())
             u_prev = u
             u = u_new
             step += 1
     return {
         "times": np.array(times),
         "energy": np.array(energy),
+        "fields": np.array(fields),
         "cfl": float(cfl),
         "src_on": src_on,
         "nx": nx,
@@ -103,6 +106,7 @@ class WaveEngine(EngineAdapter):
             "cfl": data["cfl"],
             "src_on_index": int(data["src_on"] // 4),
             "times": data["times"],
+            "field": data["fields"],
         }
         ctx.run_params = {
             "engine": self.name,
