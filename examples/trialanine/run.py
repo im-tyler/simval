@@ -69,6 +69,19 @@ def run(pdb_path: str, out_dir: str):
         sim.context.getState(getPositions=True).getPositions(),
         open(out / "topology.pdb", "w"),
     )
+    import json
+    methods = {
+        "force_field": "amber14", "water_model": "tip3p",
+        "integrator": "LangevinMiddle", "dt_ps": 0.002,
+        "temperature_K": 300, "n_steps": n_steps, "ensemble": "NVT",
+        "methods": (
+            f"MD was performed with OpenMM 8.5 using the AMBER14 force field and TIP3P water. "
+            f"Integration: LangevinMiddle, dt = 0.002 ps, constraints = h-bonds. "
+            f"Nonbonded: PME (1.0 nm cutoff). Ensemble: NVT, 300 K. "
+            f"Production length: {n_steps * 0.002:.1f} ps."
+        ),
+    }
+    (out / "methods.json").write_text(json.dumps(methods, indent=2))
     print(f"openmm run complete -> {out} ({modeller.topology.getNumResidues()} residues)")
 
 

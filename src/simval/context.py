@@ -147,11 +147,18 @@ class GromacsEngine(EngineAdapter):
 
         mdp = _find(run, "mdout.mdp", "*.mdp")
         top_top = _find(run, "*.top")
-        meta = meta_mod.build_metadata(mdp, top_top, gmx_version=_gmx_version())
-        ctx.metadata = meta
-        ctx.run_params["force_field"] = meta["force_field"]
-        ctx.run_params["water_model"] = meta["water_model"]
-        ctx.metadata["methods"] = meta_mod.render_methods(meta)
+        methods_file = run / "methods.json"
+        if methods_file.exists():
+            md = __import__("json").loads(methods_file.read_text())
+            ctx.metadata = md
+            ctx.run_params["force_field"] = md.get("force_field")
+            ctx.run_params["water_model"] = md.get("water")
+        else:
+            meta = meta_mod.build_metadata(mdp, top_top, gmx_version=_gmx_version())
+            ctx.metadata = meta
+            ctx.run_params["force_field"] = meta["force_field"]
+            ctx.run_params["water_model"] = meta["water_model"]
+            ctx.metadata["methods"] = meta_mod.render_methods(meta)
         return ctx
 
 
