@@ -26,10 +26,10 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
 def _md_metrics(run: Path, selection: str) -> dict:
     from simval import io
 
-    top = _find(run, "*.gro", "*.pdb", "*.tpr")
-    xtc = _find(run, "*.xtc")
+    top = _find(run, "*.gro", "*.pdb", "*.prmtop", "*.psf", "*.tpr")
+    xtc = _find(run, "*.xtc", "*.dcd", "*.trr", "*.nc")
     if not (top and xtc):
-        raise FileNotFoundError(f"run-dir {run} needs a trajectory (.xtc) and topology (.gro/.pdb/.tpr)")
+        raise FileNotFoundError(f"run-dir {run} needs a trajectory (.xtc/.dcd/.trr/.nc) and topology (.gro/.pdb/.prmtop/.psf/.tpr)")
 
     positions, reference, _names = io.load_trajectory(xtc, top, selection=selection)
     rseries = rmsd_mod.rmsd_over_time(positions, reference)

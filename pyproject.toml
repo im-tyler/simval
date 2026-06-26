@@ -18,6 +18,7 @@ simval-web = "simval.web:run"
 [project.optional-dependencies]
 dev = ["pytest>=7", "httpx>=0.26", "MDAnalysisTests>=2.7"]
 gromacs = ["MDAnalysis>=2.7"]
+openmm = ["openmm>=8.5", "pdbfixer>=1.9"]
 nbody = ["rebound>=3.27"]
 web = ["fastapi>=0.110", "uvicorn>=0.27"]
 

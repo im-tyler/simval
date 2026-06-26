@@ -24,3 +24,9 @@ pipeline/runs/
 
 # generated oracle/diagnose outputs in examples
 examples/**/provenance.json
+*.dcd
+*.nc
+*.prmtop
+*.psf
+*.pdb
+openmm.log

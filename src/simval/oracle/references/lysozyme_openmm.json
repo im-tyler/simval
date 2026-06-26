@@ -1,0 +1,20 @@
+{
+  "name": "lysozyme_openmm",
+  "description": "Hen lysozyme (1AKI) via OpenMM (amber14 + tip3p), minimized + 10ps NVT. Second MD engine through the same adapter; better-equilibrated than the 30ps GROMACS run.",
+  "engine": "gromacs",
+  "force_field": "amber14",
+  "selection": "protein and name CA",
+  "reference_metrics": {
+    "n_frames": 50,
+    "n_selected_atoms": 129,
+    "mean_rmsd_nm": 0.09846133659492955,
+    "final_rmsd_nm": 0.11195787388597397,
+    "rmsd_tail_drift_fraction": 0.021216705600685424,
+    "mean_rg_nm": 1.3968079090118408,
+    "final_rg_nm": 1.397441029548645,
+    "energy_relative_range": 0.007435644438489783
+  },
+  "tolerances": {},
+  "source": "examples/openmm_lysozyme (OpenMM 8.5.2, 2026-06-26)",
+  "source_hash": "60980c15759c0872"
+}

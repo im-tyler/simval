@@ -96,7 +96,7 @@ class GromacsEngine(EngineAdapter):
     name = "gromacs"
 
     def detect(self, run: Path) -> bool:
-        return bool(_find(run, "*.xtc"))
+        return bool(_find(run, "*.xtc", "*.dcd", "*.trr", "*.nc"))
 
     def load_context(self, run: Path, selection: str) -> RunContext:
         from simval import io, metadata as meta_mod
@@ -106,8 +106,8 @@ class GromacsEngine(EngineAdapter):
         ctx.run_params["engine"] = "gromacs"
         ctx.run_params["selection"] = selection
 
-        top = _find(run, "*.gro", "*.pdb", "*.tpr")
-        xtc = _find(run, "*.xtc")
+        top = _find(run, "*.gro", "*.pdb", "*.prmtop", "*.psf", "*.tpr")
+        xtc = _find(run, "*.xtc", "*.dcd", "*.trr", "*.nc")
         ctx.trajectory_path = xtc
         if top and xtc:
             ctx.positions, ctx.reference, ctx.atom_names = io.load_trajectory(xtc, top, selection=selection)

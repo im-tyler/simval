@@ -15,7 +15,7 @@ Working name; the folder may be renamed. See `PLAN.md` for the full thesis and `
 
 | Engine | Domain | Headline check |
 |---|---|---|
-| `gromacs` | molecular dynamics (GROMACS) | conserved-energy drift, RMSD/RMSF, charge neutralization |
+| `gromacs` (format-agnostic MD) | molecular dynamics — GROMACS, OpenMM, AMBER, NAMD | conserved-energy drift, RMSD/RMSF, charge neutralization |
 | `nbody-rebound` | celestial mechanics (REBOUND) | energy + angular-momentum + COM-drift conservation |
 | `wave-fdtd` | waves/PDE (built-in leapfrog FDTD) | CFL stability (`c·dt/dx ≤ 1`) + energy boundedness |
 
