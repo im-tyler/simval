@@ -21,3 +21,6 @@ pipeline/runs/
 *.xpm
 *.ndx
 *.itp
+
+# generated oracle/diagnose outputs in examples
+examples/**/provenance.json

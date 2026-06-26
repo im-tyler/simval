@@ -169,6 +169,18 @@ def _gmx_version() -> str | None:
 
 
 _ENGINES: list[EngineAdapter] = [GromacsEngine(), SyntheticEngine()]
+_optional_engines_loaded = False
+
+
+def _load_optional_engines() -> None:
+    global _optional_engines_loaded
+    if _optional_engines_loaded:
+        return
+    _optional_engines_loaded = True
+    try:
+        import simval.nbody  # noqa: F401  (registers ReboundEngine if rebound installed)
+    except Exception:
+        pass
 
 
 def register_engine(adapter: EngineAdapter) -> None:
@@ -176,6 +188,7 @@ def register_engine(adapter: EngineAdapter) -> None:
 
 
 def select_engine(run: Path) -> EngineAdapter:
+    _load_optional_engines()
     for eng in _ENGINES:
         if eng.detect(run):
             return eng

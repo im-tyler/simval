@@ -10,10 +10,20 @@ from simval.result import DiagnosticResult
 
 
 def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
-    """Scalar metrics for a candidate run, computed the same way as references."""
-    from simval import io
+    """Scalar metrics for a candidate run, computed the same way as references.
+    Dispatches by engine so the oracle is domain-general (MD today, N-body too)."""
+    from simval.context import select_engine
 
     run = Path(run_dir)
+    engine = select_engine(run)
+    if engine.name == "nbody-rebound":
+        return _nbody_metrics(run)
+    return _md_metrics(run, selection)
+
+
+def _md_metrics(run: Path, selection: str) -> dict:
+    from simval import io
+
     top = _find(run, "*.gro", "*.pdb", "*.tpr")
     xtc = _find(run, "*.xtc")
     if not (top and xtc):
@@ -40,11 +50,28 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
     xvg = _find(run, "*.xvg")
     if xvg:
         from simval.diagnostics import energy as energy_mod
-        from simval import io
         _term, e = io.load_preferred_energy(xvg)
         metrics["energy_relative_range"] = float(energy_mod.check_energy_drift(e).value)
 
     return metrics
+
+
+def _nbody_metrics(run: Path) -> dict:
+    from simval import nbody as nbody_mod
+
+    data = nbody_mod.integrate_system(run / "system.json", samples=120)
+    e = data["energy"]
+    L = data["L_magnitude"]
+    com = data["com"]
+    e_rel = float((e.max() - e.min()) / (abs(e.mean()) + 1e-15))
+    L_rel = float((L.max() - L.min()) / (abs(L.mean()) + 1e-15))
+    com_drift = float(np.sqrt(((com - com[0]) ** 2).sum(axis=1)).max())
+    return {
+        "n_samples": int(e.size),
+        "energy_relative_range": e_rel,
+        "angular_momentum_relative_range": L_rel,
+        "com_drift_max": com_drift,
+    }
 
 
 _DEFAULT_TOLERANCES = {

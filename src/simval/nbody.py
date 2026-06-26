@@ -20,6 +20,7 @@ def integrate_system(system_path, *, samples: int = 200) -> dict:
     sim = rebound.Simulation()
     sim.dt = cfg.get("dt", 0.01)
     sim.G = cfg.get("G", 1.0)
+    sim.integrator = cfg.get("integrator", "ias15")
     for body in cfg["bodies"]:
         pos = body["position"]
         vel = body["velocity"]
