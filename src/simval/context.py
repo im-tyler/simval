@@ -27,6 +27,7 @@ class RunContext:
     energy: np.ndarray | None = None
     structure_path: Path | None = None
     tpr_path: Path | None = None
+    trajectory_path: Path | None = None
     system_atom_types: list[str] | None = None
     ff_param_types: list[str] | None = None
     params: dict[str, Any] | None = None
@@ -110,6 +111,7 @@ class GromacsEngine(EngineAdapter):
 
         top = _find(run, "*.gro", "*.pdb", "*.tpr")
         xtc = _find(run, "*.xtc")
+        ctx.trajectory_path = xtc
         if top and xtc:
             ctx.positions, ctx.reference, ctx.atom_names = io.load_trajectory(xtc, top, selection=selection)
             ctx.run_params["n_frames"] = int(ctx.positions.shape[0])

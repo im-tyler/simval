@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from simval.context import RunContext, select_engine
-from simval.diagnostics import energy, equilibration, ff_coverage
+from simval.diagnostics import energy, equilibration, ff_coverage, hbonds
 from simval.diagnostics import params as params_mod
 from simval.diagnostics import prep as prep_mod
 from simval.diagnostics import rmsd as rmsd_mod
@@ -42,6 +42,11 @@ def run_checks(ctx: RunContext) -> list:
                 results.append(prep_mod.check_charge_state(ctx.structure_path, tpr_path=ctx.tpr_path))
             except Exception as e:
                 ctx.skipped["charge_state"] = str(e)[:160]
+        if ctx.trajectory_path is not None:
+            try:
+                results.append(hbonds.check_hydrogen_bonds(ctx.structure_path, ctx.trajectory_path))
+            except Exception as e:
+                ctx.skipped["hydrogen_bonds"] = str(e)[:160]
 
     if ctx.params is not None:
         results.append(params_mod.check_params(ctx.params))

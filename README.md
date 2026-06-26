@@ -60,6 +60,16 @@ service.py (stable API)  ->  cli / web / (future agent, notebook)
 
 The core is local + LLM-free (verification must be deterministic). The optional NL/agent layer is the only cloud-touching part and is gated (see PLAN §1.5.1).
 
+## Extending — adding a physics domain
+
+The port is the headroom. To add a domain:
+
+1. **Engine adapter** — subclass `EngineAdapter` (`simval/context.py`): implement `detect(run)` (recognize your run-dir) and `load_context(run) -> RunContext` (read your solver's outputs into the context). Call `register_engine(MyEngine())` at import. **Universal checks reuse automatically** — anything you put in `ctx.energy` gets `energy_drift`.
+2. **Domain checks** — add branches to `pipeline.run_checks` that fire on `ctx.extra` (your domain's observables). Return `DiagnosticResult`s.
+3. **Oracle (optional)** — add a `_xx_metrics(run)` to `oracle/validate.py` + the dispatch line, compute reference metrics from a canonical case, drop a `references/xx.json`.
+
+**Minimal reference template:** `src/simval/wave.py` (~110 lines) — a complete domain (FDTD solver, 2 checks, engine, self-registration) and `references/wave_pulse_stable.json`. `src/simval/nbody.py` is the REBOUND-wrapped variant. Copy the shape, swap the physics.
+
 ## Status
 
 Pre-alpha, no users yet. Phase 1 = plain-MD verification + provenance + oracle, with the multi-domain port proven. FEP/ΔΔG (the core pharma deliverable) is Phase 3 — a separate, months-long investment gated on a real user + domain partner. See PLAN §7.

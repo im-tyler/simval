@@ -50,3 +50,13 @@ def test_diagnose_wave_run(tmp_path):
     assert "cfl_stability" in names
     assert "wave_energy_bounded" in names
     assert manifest["verdict"] == "pass"
+
+
+def test_oracle_wave_flags_unstable_end_to_end(tmp_path):
+    run = tmp_path / "bad"
+    run.mkdir()
+    cfg = json.loads((EXAMPLE / "wave.json").read_text())
+    cfg["dt"] = 0.2  # cfl = 2.0 -> unstable scheme
+    (run / "wave.json").write_text(json.dumps(cfg))
+    result = validate(run, "wave_pulse_stable")
+    assert result.passed is False, "unstable scheme must be flagged as DRIFT by the oracle"
