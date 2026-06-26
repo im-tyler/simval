@@ -32,3 +32,26 @@ def test_largest_deltas_sorted(tmp_path):
     assert len(top) <= 3
     if len(top) > 1:
         assert top[0][1] >= top[1][1]
+
+
+def test_compare_cross_domain_raises(tmp_path):
+    import shutil
+
+    from MDAnalysisTests import datafiles
+
+    adk = _adk(tmp_path, "adk")
+    nb = tmp_path / "nb"
+    nb.mkdir()
+    shutil.copy(datafiles.XTC, nb / "traj.xtc")  # placeholder; reuse
+    # n-body example dir
+    nbody = tmp_path / "nbody"
+    nbody.mkdir()
+    import json
+    from pathlib import Path
+
+    nbody_root = Path(__file__).parent.parent / "examples" / "nbody" / "two_body"
+    shutil.copy(nbody_root / "system.json", nbody / "system.json")
+    import pytest
+
+    with pytest.raises(ValueError):
+        compare_runs(adk, nbody)

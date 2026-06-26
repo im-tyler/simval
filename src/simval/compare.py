@@ -22,6 +22,11 @@ def compare_runs(run_a, run_b, *, selection: str = "protein and name CA") -> dic
         else:
             only_b[k] = b[k]
 
+    if not deltas:
+        raise ValueError(
+            f"no overlapping metrics between {run_a} and {run_b} -- different domains/engines"
+        )
+
     return {
         "selection": selection,
         "run_a": str(run_a),
