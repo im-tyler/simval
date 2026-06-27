@@ -10,6 +10,7 @@ from simval.diagnostics import rmsd as rmsd_mod
 from simval.diagnostics import rmsf as rmsf_mod
 from simval import nbody  # noqa: F401  (registers ReboundEngine + exposes n-body checks)
 from simval import wave  # noqa: F401  (registers WaveEngine + exposes wave checks)
+from simval import fluid  # noqa: F401  (registers FluidEngine + exposes fluid checks)
 from simval.manifest import build_manifest, write_manifest
 
 
@@ -65,6 +66,10 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
         results.append(wave.check_wave_energy(
             ctx.extra["wave_energy"], src_on_index=ctx.extra.get("src_on_index", 0),
             **T.kwargs_for("wave_energy_bounded", t)))
+
+    if "tau" in ctx.extra and "mass" in ctx.extra:
+        results.append(fluid.check_tau_stability(ctx.extra["tau"]))
+        results.append(fluid.check_mass_conservation(ctx.extra["mass"]))
 
     return results
 

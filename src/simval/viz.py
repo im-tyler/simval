@@ -30,6 +30,9 @@ def series_for(run_dir, *, selection: str = "protein and name CA", max_points: i
     if "cfl" in ctx.extra:
         out["series"]["wave_energy"] = _downsample(ctx.extra["wave_energy"], max_points)
         out["field"] = _downsample_field(ctx.extra.get("field"), max_points)
+    if "tau" in ctx.extra and "mass" in ctx.extra:
+        out["series"]["fluid_mass"] = _downsample(ctx.extra["mass"], max_points)
+        out["field"] = _downsample_field(ctx.extra.get("field"), max_points)
     if "L_magnitude" in ctx.extra:
         out["series"]["angular_momentum"] = _downsample(ctx.extra["L_magnitude"], max_points)
         out["series"]["com_drift"] = _downsample(

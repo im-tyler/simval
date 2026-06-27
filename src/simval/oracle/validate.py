@@ -20,6 +20,8 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
         return _nbody_metrics(run)
     if engine.name == "wave-fdtd":
         return _wave_metrics(run)
+    if engine.name == "fluid-lbm":
+        return _fluid_metrics(run)
     return _md_metrics(run, selection)
 
 
@@ -88,6 +90,22 @@ def _wave_metrics(run: Path) -> dict:
         "cfl": float(data["cfl"]),
         "energy_growth": float(growth.value),
         "n_steps": int(data["n_steps"]),
+    }
+
+
+def _fluid_metrics(run: Path) -> dict:
+    import json
+
+    from simval.fluid import check_mass_conservation, check_tau_stability, integrate_fluid
+
+    cfg = json.loads((run / "fluid.json").read_text())
+    data = integrate_fluid(cfg)
+    tau = check_tau_stability(data["tau"])
+    mass = check_mass_conservation(data["mass"])
+    return {
+        "tau": float(data["tau"]),
+        "mass_drift": float(mass.value),
+        "tau_in_range": 1.0 if tau.passed else 0.0,
     }
 
 

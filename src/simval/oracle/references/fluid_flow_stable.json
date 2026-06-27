@@ -1,0 +1,28 @@
+{
+  "name": "fluid_flow_stable",
+  "description": "2D Lattice Boltzmann (D2Q9, BGK), periodic, tau=0.8. Reference: exact mass conservation + stable tau.",
+  "engine": "fluid-lbm",
+  "force_field": "n/a",
+  "selection": "n/a",
+  "reference_metrics": {
+    "tau": 0.8,
+    "mass_drift": 5.350634445146587e-14,
+    "tau_in_range": 1.0
+  },
+  "tolerances": {
+    "tau": [
+      "abs",
+      2.0
+    ],
+    "mass_drift": [
+      "abs",
+      0.001
+    ],
+    "tau_in_range": [
+      "abs",
+      0.5
+    ]
+  },
+  "source": "examples/fluid/flow (LBM D2Q9, 2026-06-26)",
+  "source_hash": ""
+}
