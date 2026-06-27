@@ -1,14 +1,15 @@
 {
-  "name": "kinetics_reaction",
   "description": "Coupled reaction cycle",
   "engine": "chemical-kinetics",
   "force_field": "n/a",
-  "selection": "n/a",
+  "name": "kinetics_reaction",
   "reference_metrics": {
     "mass_balance_drift": 8.881784197001245e-16,
     "n_steps": 1000
   },
-  "tolerances": {},
+  "reference_version": "0.1.0",
+  "selection": "n/a",
   "source": "examples/kinetics/reaction",
-  "source_hash": ""
+  "source_hash": "",
+  "tolerances": {}
 }

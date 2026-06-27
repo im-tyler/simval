@@ -1,14 +1,17 @@
 {
-  "name": "wave_pulse_stable",
   "description": "1D scalar wave, leapfrog FDTD, CFL=0.5 (stable). Reference: bounded energy (growth ~1.0). Oracle checks CFL + energy growth (abs tolerances).",
   "engine": "wave-fdtd",
   "force_field": "n/a",
-  "selection": "n/a",
+  "name": "wave_pulse_stable",
   "reference_metrics": {
     "cfl": 0.5,
     "energy_growth": 1.007381034165939,
     "n_steps": 2000
   },
+  "reference_version": "0.1.0",
+  "selection": "n/a",
+  "source": "examples/wave/pulse (FDTD, 2026-06-26)",
+  "source_hash": "",
   "tolerances": {
     "cfl": [
       "abs",
@@ -18,7 +21,5 @@
       "abs",
       1.25
     ]
-  },
-  "source": "examples/wave/pulse (FDTD, 2026-06-26)",
-  "source_hash": ""
+  }
 }

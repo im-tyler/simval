@@ -1,21 +1,20 @@
 {
-  "name": "h2_rhf",
   "description": "H2 at 0.74 Angstrom, RHF/sto3g. Reference: PySCF SCF converges, total energy ~-1.1167 Hartree.",
   "engine": "qc-pyscf",
   "force_field": "n/a",
-  "selection": "n/a",
+  "name": "h2_rhf",
   "reference_metrics": {
     "final_energy": -1.1167593073964255,
-    "scf_last_delta": 6.661338147750939e-16,
     "n_cycles": 2,
-    "n_electrons": 2
+    "n_electrons": 2,
+    "scf_last_delta": 6.661338147750939e-16
   },
+  "reference_version": "0.1.0",
+  "selection": "n/a",
+  "source": "examples/qc/h2 (PySCF RHF/sto3g, 2026-06-27)",
+  "source_hash": "",
   "tolerances": {
     "final_energy": [
-      "abs",
-      1e-06
-    ],
-    "scf_last_delta": [
       "abs",
       1e-06
     ],
@@ -24,8 +23,10 @@
     ],
     "n_electrons": [
       "exact"
+    ],
+    "scf_last_delta": [
+      "abs",
+      1e-06
     ]
-  },
-  "source": "examples/qc/h2 (PySCF RHF/sto3g, 2026-06-27)",
-  "source_hash": ""
+  }
 }

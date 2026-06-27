@@ -1,19 +1,20 @@
 {
-  "name": "benzene_hydration_fep",
   "description": "Benzene hydration free energy from alchemtest (GROMACS dHdl, TI estimator). First real-FEP-data reference (not synthetic).",
   "engine": "fep",
   "force_field": "gromos43a1",
-  "selection": "n/a",
+  "name": "benzene_hydration_fep",
   "reference_metrics": {
     "deltaG": 0.03320949981348287,
     "overlap_min_eig": 0.0
   },
+  "reference_version": "0.1.0",
+  "selection": "n/a",
+  "source": "alchemtest.gmx.load_benzene (BSD-3, 2026-06-26)",
+  "source_hash": "",
   "tolerances": {
     "deltaG": [
       "abs",
       2.0
     ]
-  },
-  "source": "alchemtest.gmx.load_benzene (BSD-3, 2026-06-26)",
-  "source_hash": ""
+  }
 }

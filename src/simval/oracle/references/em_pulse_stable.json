@@ -1,14 +1,17 @@
 {
-  "name": "em_pulse_stable",
   "description": "2D TMz Maxwell FDTD, Courant-stable, radiating pulse.",
   "engine": "em-fdtd",
   "force_field": "n/a",
-  "selection": "n/a",
+  "name": "em_pulse_stable",
   "reference_metrics": {
     "courant": 0.7071067811865475,
     "em_energy_growth": 1.014108963278368,
     "n_steps": 800
   },
+  "reference_version": "0.1.0",
+  "selection": "n/a",
+  "source": "examples/em/wave (Yee FDTD, 2026-06-26)",
+  "source_hash": "",
   "tolerances": {
     "courant": [
       "abs",
@@ -18,7 +21,5 @@
       "abs",
       1.25
     ]
-  },
-  "source": "examples/em/wave (Yee FDTD, 2026-06-26)",
-  "source_hash": ""
+  }
 }

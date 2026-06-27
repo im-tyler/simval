@@ -1,14 +1,15 @@
 {
-  "name": "relativistic_boris",
   "description": "Boris pusher",
   "engine": "relativistic-boris",
   "force_field": "n/a",
-  "selection": "n/a",
+  "name": "relativistic_boris",
   "reference_metrics": {
     "gamma_drift": 3.9720546451956327e-16,
     "n_steps": 1000
   },
-  "tolerances": {},
+  "reference_version": "0.1.0",
+  "selection": "n/a",
   "source": "examples/relativistic/particle",
-  "source_hash": ""
+  "source_hash": "",
+  "tolerances": {}
 }
