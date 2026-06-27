@@ -57,6 +57,17 @@ def main(argv=None) -> int:
     ft.add_argument("out_dir", nargs="?", default=".")
     ft.add_argument("--source", default=None, choices=["pdb", "alphafold"])
 
+    af = sub.add_parser("afold", help="AlphaFold pLDDT confidence profile for a UniProt id")
+    af.add_argument("uniprot_id")
+    af.add_argument("out_dir", nargs="?", default=".")
+
+    omx = sub.add_parser("export-omex", help="package a run's provenance + artifacts into a COMBINE archive (.omex)")
+    omx.add_argument("run_dir")
+    omx.add_argument("out_path", nargs="?", default=None)
+
+    ci = sub.add_parser("case-info", help="show provenance + reference metrics for a stored case")
+    ci.add_argument("name")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "diagnose":
@@ -161,6 +172,43 @@ def main(argv=None) -> int:
         if info is None:
             return 1
         print(f"simval {__version__} | fetched {info['id']} from {info['source']} -> {info['path']} ({info['bytes']} bytes)")
+        return 0
+
+    if args.cmd == "afold":
+        from simval.afold import check_plddt_profile, fetch_plddt
+        fetched = _safe(lambda: fetch_plddt(args.uniprot_id, args.out_dir))
+        if fetched is None:
+            return 1
+        plddt, path = fetched
+        r = check_plddt_profile(plddt)
+        flag = "CONFIDENT" if r.passed else "LOW-CONFIDENCE"
+        print(f"simval {__version__} | AlphaFold pLDDT {args.uniprot_id} | {flag}")
+        print(f"  mean pLDDT={r.detail['mean_plddt']:.1f}  residues={r.detail['n_residues']}")
+        print(f"  <50: {r.detail['fraction_below_50']*100:.1f}%  <70: {r.detail['fraction_below_70']*100:.1f}%  >90: {r.detail['fraction_above_90']*100:.1f}%")
+        if r.detail["low_confidence_residue_indices"]:
+            print(f"  low-confidence residues: {r.detail['low_confidence_residue_indices'][:20]}")
+        return 0 if r.passed else 1
+
+    if args.cmd == "export-omex":
+        from simval.omex import export_omex
+        out_path = args.out_path or f"{Path(args.run_dir).name}.omex"
+        info = _safe(lambda: export_omex(args.run_dir, out_path))
+        if info is None:
+            return 1
+        print(f"simval {__version__} | OMEX archive -> {info['path']} ({info['bytes']} bytes, {len(info['entries'])} entries)")
+        return 0
+
+    if args.cmd == "case-info":
+        from simval.oracle import get_case
+        case = _safe(lambda: get_case(args.name))
+        if case is None:
+            return 1
+        print(f"simval {__version__} | case: {case.name}")
+        print(f"  engine: {case.engine}  | ff: {case.force_field} | selection: {case.selection}")
+        print(f"  description: {case.description}")
+        print(f"  source: {case.source}")
+        print(f"  reference metrics: {case.reference_metrics}")
+        print(f"  tolerances: {case.tolerances or '(defaults)'}")
         return 0
 
     if args.cmd == "validate":
