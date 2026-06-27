@@ -14,7 +14,7 @@ def series_for(run_dir, *, selection: str = "protein and name CA", max_points: i
     run = Path(run_dir)
     engine = select_engine(run)
     ctx = engine.load_context(run, selection)
-    out: dict = {"engine": engine.name, "series": {}, "orbit": None}
+    out: dict = {"engine": engine.name, "series": {}, "orbit": None, "field": None}
 
     if ctx.energy is not None:
         out["series"]["energy"] = _downsample(ctx.energy, max_points)
@@ -27,30 +27,25 @@ def series_for(run_dir, *, selection: str = "protein and name CA", max_points: i
         rmsf = per_residue_rmsf(ctx.ca_positions, ctx.ca_reference)
         out["series"]["rmsf_nm"] = rmsf.tolist()
 
-    if "cfl" in ctx.extra:
-        out["series"]["wave_energy"] = _downsample(ctx.extra["wave_energy"], max_points)
-        out["field"] = _downsample_field(ctx.extra.get("field"), max_points)
-    if "tau" in ctx.extra and "mass" in ctx.extra:
-        out["series"]["fluid_mass"] = _downsample(ctx.extra["mass"], max_points)
-        out["field"] = _downsample_field(ctx.extra.get("field"), max_points)
-    if "courant" in ctx.extra and "em_energy" in ctx.extra:
-        out["series"]["em_energy"] = _downsample(ctx.extra["em_energy"], max_points)
-        out["field"] = _downsample_field(ctx.extra.get("field"), max_points)
-    if "norm" in ctx.extra and "p_up" in ctx.extra:
-        out["series"]["quantum_norm"] = _downsample(ctx.extra["norm"], max_points)
-        out["series"]["spin_up_probability"] = _downsample(ctx.extra["p_up"], max_points)
-    if "L_magnitude" in ctx.extra:
-        out["series"]["angular_momentum"] = _downsample(ctx.extra["L_magnitude"], max_points)
-        out["series"]["com_drift"] = _downsample(
-            __import__("numpy").sqrt(((ctx.extra["com"] - ctx.extra["com"][0]) ** 2).sum(axis=1)),
-            max_points,
-        )
+    # n-body orbit
+    if "body_xy" in ctx.extra:
         body_xy = ctx.extra["body_xy"]
         out["orbit"] = [
             {"x": _downsample(body_xy[bi, :, 0], max_points),
              "y": _downsample(body_xy[bi, :, 1], max_points)}
             for bi in range(body_xy.shape[0])
         ]
+
+    # GENERIC: any 1D array in ctx.extra -> series; any 2D -> field heatmap.
+    # Makes ALL domains render automatically without per-domain code.
+    import numpy as _np
+    for key, val in ctx.extra.items():
+        if isinstance(val, _np.ndarray):
+            if val.ndim == 1 and val.size > 1 and key not in out["series"]:
+                out["series"][key] = _downsample(val, max_points)
+            elif val.ndim == 2 and out["field"] is None:
+                out["field"] = _downsample_field(val, max_points)
+
     return out
 
 
