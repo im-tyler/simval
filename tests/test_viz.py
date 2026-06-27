@@ -25,7 +25,7 @@ def test_nbody_series_has_orbit():
     s = series_for(EXAMPLE, selection="n/a")
     assert s["engine"] == "nbody-rebound"
     assert "energy" in s["series"]
-    assert "angular_momentum" in s["series"]
+    assert "L_magnitude" in s["series"]
     assert s["orbit"] is not None
     assert len(s["orbit"]) >= 2
     assert set(s["orbit"][0]) == {"x", "y"}
