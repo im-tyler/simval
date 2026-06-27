@@ -215,6 +215,18 @@ def _load_optional_engines() -> None:
         import simval.qiskit_eng  # noqa: F401  (registers QiskitEngine; needs qiskit)
     except Exception:
         pass
+    try:
+        import simval.kinetics  # noqa: F401  (numpy-only)
+    except Exception:
+        pass
+    try:
+        import simval.diffusion  # noqa: F401  (numpy-only)
+    except Exception:
+        pass
+    try:
+        import simval.relativistic  # noqa: F401  (numpy-only)
+    except Exception:
+        pass
 
 
 def register_engine(adapter: EngineAdapter) -> None:

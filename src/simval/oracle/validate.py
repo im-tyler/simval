@@ -32,6 +32,12 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
         return _pyscf_metrics(run)
     if engine.name == "qc-qiskit":
         return _qiskit_metrics(run)
+    if engine.name == "chemical-kinetics":
+        return _kinetics_metrics(run)
+    if engine.name == "heat-diffusion":
+        return _diffusion_metrics(run)
+    if engine.name == "relativistic-boris":
+        return _relativistic_metrics(run)
     return _md_metrics(run, selection)
 
 
@@ -182,6 +188,39 @@ def _qiskit_metrics(run: Path) -> dict:
         "norm_drift": float(nm.value),
         "n_qubits": int(ctx.extra["n_qubits"]),
     }
+
+
+def _kinetics_metrics(run: Path) -> dict:
+    import json
+
+    from simval.kinetics import check_mass_balance, integrate_kinetics
+
+    cfg = json.loads((run / "kinetics.json").read_text())
+    data = integrate_kinetics(cfg)
+    mb = check_mass_balance(data["history"])
+    return {"mass_balance_drift": float(mb.value), "n_steps": int(data["n_steps"])}
+
+
+def _diffusion_metrics(run: Path) -> dict:
+    import json
+
+    from simval.diffusion import check_fourier_stability, check_heat_conservation, integrate_diffusion
+
+    cfg = json.loads((run / "diffusion.json").read_text())
+    data = integrate_diffusion(cfg)
+    hc = check_heat_conservation(data["energy"])
+    return {"fourier": float(data["fourier"]), "energy_drift": float(hc.value)}
+
+
+def _relativistic_metrics(run: Path) -> dict:
+    import json
+
+    from simval.relativistic import check_relativistic_energy, integrate_relativistic
+
+    cfg = json.loads((run / "relativistic.json").read_text())
+    data = integrate_relativistic(cfg)
+    re = check_relativistic_energy(data["gamma"])
+    return {"gamma_drift": float(re.value), "n_steps": int(data["n_steps"])}
 
 
 _DEFAULT_TOLERANCES = {

@@ -16,6 +16,9 @@ from simval import quantum  # noqa: F401  (registers QuantumEngine + exposes qua
 from simval import fep  # noqa: F401  (registers FepEngine + exposes FEP checks)
 from simval import pyscf_eng  # noqa: F401  (registers PyscfEngine + exposes SCF checks)
 from simval import qiskit_eng  # noqa: F401  (registers QiskitEngine + exposes circuit checks)
+from simval import kinetics  # noqa: F401
+from simval import diffusion  # noqa: F401
+from simval import relativistic  # noqa: F401
 from simval.manifest import build_manifest, write_manifest
 
 
@@ -99,6 +102,17 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
         results.append(qiskit_eng.check_norm_conservation(ctx.extra["statevector"]))
         results.append(qiskit_eng.check_measurement_distribution(
             ctx.extra["probabilities"], ctx.extra.get("expected_probabilities")))
+
+    if "history" in ctx.extra and "species" in ctx.extra:
+        results.append(kinetics.check_mass_balance(ctx.extra["history"]))
+        results.append(kinetics.check_positive_concentrations(ctx.extra["history"]))
+
+    if "fourier" in ctx.extra:
+        results.append(diffusion.check_fourier_stability(ctx.extra["fourier"]))
+        results.append(diffusion.check_heat_conservation(ctx.extra["heat_energy"]))
+
+    if "gamma" in ctx.extra:
+        results.append(relativistic.check_relativistic_energy(ctx.extra["gamma"]))
 
     return results
 
