@@ -29,7 +29,7 @@ def integrate_relativistic(cfg: dict) -> dict:
         for _ in range(n):
             gamma = np.sqrt(1.0 + (p @ p) / (m * c) ** 2)
             gamma_history.append(float(gamma))
-            v = p / (gamma * m)
+            p / (gamma * m)
             t_half = q * B * dt / (2.0 * gamma * m)
             s = 2.0 * t_half / (1.0 + t_half @ t_half)
             p_minus = p + q * E * dt / 2.0
