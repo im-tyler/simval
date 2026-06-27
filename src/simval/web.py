@@ -1,20 +1,18 @@
-"""Minimal local-first web dashboard. Proves the service API is UI-agnostic —
-any future UI (notebook, full SPA, agent) replaces this thin layer without
-touching the core. Optional dep: pip install 'simval[web]'."""
+"""Local-first web dashboard. Optional dep: pip install 'simval[web]'."""
 from __future__ import annotations
 
+import os
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
-from simval import __version__
-from simval import service
+from simval import __version__, service
 
 app = FastAPI(title="simval", version=__version__)
 
 
 def _run(fn):
-    """Wrap a service call so a bad run-dir/case returns HTTP 400, not 500."""
     try:
         return fn()
     except (FileNotFoundError, ValueError, KeyError) as e:
@@ -34,6 +32,17 @@ def engines():
 @app.get("/api/cases")
 def cases():
     return {"cases": service.cases()}
+
+
+@app.get("/api/examples")
+def examples():
+    root = Path("examples")
+    dirs = []
+    if root.exists():
+        for dp, _, fns in os.walk(str(root)):
+            if any(f.endswith(".json") for f in fns):
+                dirs.append(dp)
+    return {"examples": sorted(dirs)}
 
 
 @app.get("/api/inspect")
@@ -74,163 +83,110 @@ def structure(run_dir: str, frame: int = 0, selection: str = "protein"):
     return _run(lambda: {"pdb": structure_pdb(run_dir, frame=frame, selection=selection)})
 
 
+def run(argv=None) -> None:
+    import argparse
+    import uvicorn
+
+    p = argparse.ArgumentParser(prog="simval-web")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    a = p.parse_args(argv)
+    uvicorn.run(app, host=a.host, port=a.port)
+
+
 _HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>simval</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/3dmol@2.4.2/build/3Dmol-min.js"></script>
 <style>
- body{font:14px/1.5 -apple-system,system-ui,sans-serif;max-width:1100px;margin:1.5rem auto;padding:0 1rem;color:#222}
- h1{font-size:1.3rem} label{display:block;margin:.6rem 0 .15rem;color:#444}
- input,button,select{font:inherit;padding:.35rem .5rem;border:1px solid #bbb;border-radius:4px}
- button{background:#1a1a1a;color:#fff;border-color:#1a1a1a;cursor:pointer;margin-right:.4rem}
- button.alt{background:#fff;color:#1a1a1a}
- pre{background:#f5f5f5;padding:.6rem;border-radius:4px;overflow:auto;max-height:200px;font-size:12px}
- .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
- .cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
- .card{background:#fafafa;border:1px solid #eee;border-radius:6px;padding:.6rem}
- canvas{max-width:100%}
- .viewer{width:100%;height:300px;position:relative;background:#fff;border:1px solid #ddd}
- .slide{width:100%}
+*{box-sizing:border-box;margin:0}
+body{font:14px/1.5 -apple-system,system-ui,sans-serif;background:#0e0e0e;color:#ddd}
+.wrap{max-width:1000px;margin:0 auto;padding:1rem}
+h1{font-size:1.1rem;margin-bottom:.4rem}
+h1 span{color:#555}
+.bar{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem}
+input,select{font:inherit;padding:.3rem .4rem;border:1px solid #333;border-radius:4px;background:#1a1a1a;color:#ddd}
+button{font:inherit;padding:.3rem .7rem;border:none;border-radius:4px;cursor:pointer}
+.btn-go{background:#2a5;color:#fff}
+.btn-ghost{background:#222;color:#aaa;border:1px solid #333}
+.badge{padding:.1rem .5rem;border-radius:10px;font-size:.7rem;background:#1e3;color:#7df}
+.pass{color:#5b8}.fail{color:#e55}
+.cards{display:flex;flex-direction:column;gap:.6rem;margin-top:.6rem}
+.card{background:#161616;border:1px solid #222;border-radius:6px;padding:.6rem;display:none}
+.card.on{display:block}
+.card h3{font-size:.75rem;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.3rem}
+.viewer{width:100%;height:300px}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+td,th{padding:.15rem .3rem;border-bottom:1px solid #222}
+th{color:#666}
+pre{background:#0a0a0a;padding:.4rem;border-radius:4px;overflow:auto;max-height:120px;font-size:11px;color:#888}
 </style></head><body>
-<h1>simval <span style="color:#888;font-weight:normal">verify + render</span></h1>
-
-<label>Run directory</label>
-<input id="run" size="70" placeholder="/path/to/run-dir" value="examples/openmm_lysozyme">
-<div class="row">
- <label>Analysis <input id="sel" size="22" value="protein and name CA"></label>
- <label>3D view <input id="view" size="22" value="protein"></label>
+<div class="wrap">
+<h1>simval <span>verify + render</span></h1>
+<div class="bar">
+<select id="picker" onchange="pick()" style="min-width:200px"></select>
+<input id="run" size="44" placeholder="path or pick above" value="examples/openmm_lysozyme">
+<input id="sel" size="16" value="protein and name CA">
 </div>
-
-<div class="row" style="margin:1rem 0">
- <button onclick="plot()">Plot</button>
- <button class="alt" onclick="load3d()">Load 3D</button>
- <button class="alt" onclick="call('diagnose')">Diagnose</button>
- <button class="alt" onclick="call('inspect')">Inspect</button>
- <button class="alt" onclick="loadCases()">Cases</button>
- <select id="case"></select>
- <button class="alt" onclick="call('validate')">Validate</button>
+<div class="bar">
+<button class="btn-go" onclick="plot()">Load</button>
+<button class="btn-ghost" onclick="diag()">Diagnose</button>
+<span id="badge" style="margin-left:auto"></span>
 </div>
-
-<div class="cols">
- <div class="card" style="grid-column:1/-1"><h3>Structure 3D (MD)</h3>
-  <div id="viewer3d" class="viewer"></div>
-  <div class="row" style="margin-top:.4rem">
-   <input id="frameSlider" class="slide" type="range" min="0" max="0" value="0" oninput="onFrame()">
-   <span id="frameLabel">—</span>
-  </div>
- </div>
- <div class="card"><h3>Series</h3>
-  <select id="metric" onchange="renderSeries()"></select>
-  <canvas id="seriesChart" height="180"></canvas>
- </div>
- <div class="card"><h3>Orbit (N-body)</h3>
-  <canvas id="orbitChart" height="180"></canvas>
-  <div class="row" style="margin-top:.4rem">
-   <input id="orbitSlider" class="slide" type="range" min="1" max="100" value="100" oninput="renderOrbit()">
-  </div>
- </div>
- <div class="card" style="grid-column:1/-1"><h3>Field u(x,t) (waves)</h3>
-  <canvas id="fieldCanvas" height="100"></canvas>
- </div>
-</div>
-
-<h3>Result</h3>
-<pre id="out">—</pre>
-
+<div class="cards">
+<div class="card" id="c-verdict"><h3>Verdict</h3><div id="vbox"></div></div>
+<div class="card" id="c-3d"><h3>Structure 3D</h3>
+<div id="v3d" class="viewer"></div>
+<div style="display:flex;gap:.4rem;align-items:center;margin-top:.3rem">
+<input id="fs" type="range" min="0" max="0" oninput="frame()" style="flex:1">
+<span id="fl" style="font-size:.7rem;color:#666"></span></div></div>
+<div class="card" id="c-s"><h3>Series</h3>
+<select id="met" onchange="rSer()" style="margin-bottom:.2rem"></select>
+<canvas id="sc" height="150"></canvas></div>
+<div class="card" id="c-orb"><h3>Orbit</h3>
+<canvas id="oc" height="150"></canvas>
+<input id="os" type="range" min="1" max="100" value="100" oninput="rOrb()" style="width:100%;margin-top:.2rem"></div>
+<div class="card" id="c-fld"><h3>Field</h3><canvas id="fc" height="70"></canvas></div>
+<div class="card" id="c-raw"><h3>Raw JSON</h3><pre id="raw"></pre></div>
+</div></div>
 <script>
-let LAST=null, seriesChart=null, orbitChart=null, VWR=null, NFRAMES=0, CURFRAME=0, SEL='protein';
-async function loadCases(){const r=await(await fetch('/api/cases')).json();document.getElementById('case').innerHTML=r.cases.map(c=>`<option>${c}</option>`).join('');show(r);}
+let D=null,sC=null,oC=null,V=null,NF=0;
+const $=id=>document.getElementById(id);
+const off=()=>['c-verdict','c-3d','c-s','c-orb','c-fld','c-raw'].forEach(c=>$(c).classList.remove('on'));
+const on=c=>$(c).classList.add('on');
+async function loadPicker(){try{const r=await(await fetch('/api/examples')).json();$('picker').innerHTML='<option value="">-- pick --</option>'+r.examples.map(e=>`<option>${e}</option>`).join('');}catch(e){}}
+function pick(){const v=$('picker').value;if(v){$('run').value=v;plot();}}
 async function plot(){
-  const run=document.getElementById('run').value, sel=document.getElementById('sel').value;
-  SEL=sel;
-  const r=await(await fetch(`/api/series?run_dir=${encodeURIComponent(run)}&selection=${encodeURIComponent(sel)}`)).json();
-  LAST=r; show(r);
-  const m=document.getElementById('metric'); m.innerHTML=Object.keys(r.series).map(k=>`<option>${k}</option>`).join('');
-  const os=document.getElementById('orbitSlider'); os.value=os.max; os.disabled = !(r.orbit&&r.orbit.length);
-  renderSeries(); renderOrbit(); renderField(r.field);
+  const r=$('run').value,s=$('sel').value;if(!r)return;
+  let d;try{d=await(await fetch(`/api/series?run_dir=${encodeURIComponent(r)}&selection=${encodeURIComponent(s)}`)).json();}catch(e){$('raw').textContent=e;on('c-raw');return;}
+  D=d;$('badge').innerHTML=`<span class="badge">${d.engine}</span>`;off();
+  if(d.series&&Object.keys(d.series).length){const m=$('met');m.innerHTML=Object.keys(d.series).map(k=>`<option>${k}</option>`).join('');on('c-s');rSer();}
+  if(d.orbit&&d.orbit.length){on('c-orb');$('os').value=100;rOrb();}
+  if(d.field){on('c-fld');rFld(d.field);}
+  try{const fr=await(await fetch(`/api/frames?run_dir=${encodeURIComponent(r)}`)).json();NF=fr.n_frames||0;if(NF>0){$('fs').max=NF-1;$('fs').value=0;await r3d(0);on('c-3d');}}catch(e){}
 }
-async function load3d(){
-  const run=document.getElementById('run').value;
-  try{const fr=await(await fetch(`/api/frames?run_dir=${encodeURIComponent(run)}`)).json(); NFRAMES=fr.n_frames||0;}
-  catch(e){NFRAMES=0;}
-  const label=document.getElementById('frameLabel');
-  if(NFRAMES<=0){
-    document.getElementById('frameSlider').max=0;
-    label.textContent='no MD trajectory to render (MD only)';
-    if(VWR){VWR.removeAllModels();}
-    return;
-  }
-  const sl=document.getElementById('frameSlider'); sl.max=NFRAMES-1; sl.value=0;
-  CURFRAME=0; await render3d(0);
-}
-async function render3d(frame){
-  const run=document.getElementById('run').value;
-  const view=document.getElementById('view').value || 'protein';
-  document.getElementById('frameLabel').textContent=`frame ${frame}/${Math.max(0,NFRAMES-1)}`;
-  let r; try{r=await(await fetch(`/api/structure?run_dir=${encodeURIComponent(run)}&frame=${frame}&selection=${encodeURIComponent(view)}`)).json();}
-  catch(e){show({error:String(e)});return;}
-  if(!r||!r.pdb){return;}
-  const el=document.getElementById('viewer3d');
-  if(VWR){VWR.removeAllModels();} else {VWR=$3Dmol.createViewer(el,{backgroundColor:'#ffffff'});}
-  VWR.addModel(r.pdb,'pdb');
-  VWR.setStyle({},{cartoon:{color:'spectrum'}});
-  VWR.setStyle({hetflag:true},{stick:{radius:0.15,colorscheme:'element'}});
-  VWR.zoomTo(); VWR.render();
-}
-function onFrame(){const f=+document.getElementById('frameSlider').value; CURFRAME=f; render3d(f);}
-window.addEventListener('load',()=>{ plot(); load3d(); });
-function renderSeries(){
-  if(!LAST||!LAST.series) return;
-  const key=document.getElementById('metric').value; const data=LAST.series[key]; if(!data) return;
-  if(seriesChart) seriesChart.destroy();
-  seriesChart=new Chart(document.getElementById('seriesChart'),{type:'line',
-    data:{labels:data.map((_,i)=>i),datasets:[{label:key,data,borderColor:'#1a6',borderWidth:1.5,pointRadius:0,tension:.2}]},
-    options:{plugins:{legend:{display:true}},scales:{x:{display:false}},animation:false}});
-}
-function renderOrbit(){
-  if(orbitChart) orbitChart.destroy();
-  const el=document.getElementById('orbitChart');
-  const orbit=LAST&&LAST.orbit;
-  if(!orbit||!orbit.length){ el.getContext('2d').clearRect(0,0,el.width,el.height); return; }
-  const upto=Math.max(1, Math.round((+document.getElementById('orbitSlider').value/100)*orbit[0].x.length));
-  const cols=['#1a6','#a36','#06c','#c60','#36a','#6a6'];
-  orbitChart=new Chart(el,{type:'scatter',
-    datasets:orbit.map((o,i)=>({label:'body '+i,data:o.x.slice(0,upto).map((x,j)=>({x,y:o.y[j]})),borderColor:cols[i%6],borderWidth:1,pointRadius:.4,showLine:true})),
-    options:{plugins:{legend:{display:true}},scales:{x:{title:{display:true,text:'x'}},y:{title:{display:true,text:'y'}}},animation:false}});
-}
-function renderField(field){
-  const cv=document.getElementById('fieldCanvas'); const ctx=cv.getContext('2d');
-  ctx.clearRect(0,0,cv.width,cv.height);
-  if(!field||!field.length) return;
-  const nt=field.length, nx=field[0].length;
-  let mx=0; for(let i=0;i<nt;i++)for(let j=0;j<nx;j++)mx=Math.max(mx,Math.abs(field[i][j])); mx=mx||1;
-  const w=cv.width=cv.clientWidth||600, h=cv.height; const pix={x:w/nx,y:h/nt};
-  for(let i=0;i<nt;i++)for(let j=0;j<nx;j++){
-    const v=field[i][j]/mx; const r=v>0?Math.round(220*v):0, b=v<0?Math.round(-220*v):0, g=40*Math.abs(v);
-    ctx.fillStyle=`rgb(${r},${g},${b})`; ctx.fillRect(j*pix.x,(nt-1-i)*pix.y,Math.ceil(pix.x)+1,Math.ceil(pix.y)+1);
-  }
-}
-async function call(kind){
-  const run=document.getElementById('run').value, sel=document.getElementById('sel').value, cs=document.getElementById('case').value;
-  let url,opt={};
-  if(kind==='inspect')url=`/api/inspect?run_dir=${encodeURIComponent(run)}&selection=${encodeURIComponent(sel)}`;
-  else if(kind==='diagnose'){url=`/api/diagnose?run_dir=${encodeURIComponent(run)}&selection=${encodeURIComponent(sel)}`;opt.method='POST';}
-  else if(kind==='validate'){url=`/api/validate?run_dir=${encodeURIComponent(run)}&case=${encodeURIComponent(cs)}&selection=${encodeURIComponent(sel)}`;opt.method='POST';}
-  try{show(await(await fetch(url,opt)).json());}catch(e){show({error:String(e)});}
-}
-function show(o){document.getElementById('out').textContent=JSON.stringify(o,null,2);}
-</script>
-</body></html>
+async function r3d(f){
+  const r=$('run').value;$('fl').textContent=`frame ${f}/${Math.max(0,NF-1)}`;
+  let d;try{d=await(await fetch(`/api/structure?run_dir=${encodeURIComponent(r)}&frame=${f}&selection=protein`)).json();}catch(e){return;}
+  if(!d.pdb)return;const el=$('v3d');if(V){V.removeAllModels();}else{V=$3Dmol.createViewer(el,{backgroundColor:'#000'});}
+  V.addModel(d.pdb,'pdb');V.setStyle({},{cartoon:{color:'spectrum'}});V.zoomTo();V.render();}
+function frame(){r3d(+$('fs').value);}
+function rSer(){if(!D||!D.series)return;const k=$('met').value,v=D.series[k];if(!v)return;if(sC)sC.destroy();
+sC=new Chart($('sc'),{type:'line',data:{labels:v.map((_,i)=>i),datasets:[{label:k,data:v,borderColor:'#5af',borderWidth:1.5,pointRadius:0,tension:.2}]},options:{plugins:{legend:{labels:{color:'#aaa'}}},scales:{x:{ticks:{color:'#555'}},y:{ticks:{color:'#555'}}},animation:false}});}
+function rOrb(){if(oC)oC.destroy();const o=D&&D.orbit;if(!o||!o.length)return;
+const up=Math.max(1,Math.round((+$('os').value/100)*o[0].x.length));const cs=['#5af','#f8a','#5fa','#fa5','#a5f','#5fa'];
+oC=new Chart($('oc'),{type:'scatter',datasets:o.map((b,i)=>({label:'b'+i,data:b.x.slice(0,up).map((x,j)=>({x,y:b.y[j]})),borderColor:cs[i%6],borderWidth:1,pointRadius:.3,showLine:true})),options:{plugins:{legend:{labels:{color:'#aaa'}}},scales:{x:{ticks:{color:'#555'}},y:{ticks:{color:'#555'}}},animation:false}});}
+function rFld(f){const cv=$('fc'),cx=cv.getContext('2d');cx.clearRect(0,0,cv.width,cv.height);if(!f||!f.length)return;
+const nt=f.length,nx=f[0].length;let mx=0;for(let i=0;i<nt;i++)for(let j=0;j<nx;j++)mx=Math.max(mx,Math.abs(f[i][j]));mx=mx||1;
+const w=cv.width=cv.clientWidth||400,h=cv.height,px={x:w/nx,y:h/nt};for(let i=0;i<nt;i++)for(let j=0;j<nx;j++){const v=f[i][j]/mx;cx.fillStyle=`rgb(${v>0?Math.round(180*v):0},${20*Math.abs(v)},${v<0?Math.round(-180*v):0})`;cx.fillRect(j*px.x,(nt-1-i)*px.y,Math.ceil(px.x)+1,Math.ceil(px.y)+1);}}
+async function diag(){
+  const r=$('run').value,s=$('sel').value;if(!r)return;
+  let d;try{d=await(await fetch(`/api/diagnose?run_dir=${encodeURIComponent(r)}&selection=${encodeURIComponent(s)}`,{method:'POST'})).json();}catch(e){$('raw').textContent=e;on('c-raw');return;}
+  on('c-verdict');const v=d.verdict.toUpperCase(),c=v==='PASS'?'pass':'fail';
+  let h=`<div style="font-size:1.5rem;font-weight:bold" class="${c}">${v}</div><table><tr><th>Check</th><th style="text-align:right">Value</th><th style="text-align:right">Limit</th><th></th></tr>`;
+  for(const r of d.diagnostics){const ok=r.passed;h+=`<tr><td>${r.name}</td><td style="text-align:right">${r.value.toExponential(2)}</td><td style="text-align:right">${r.threshold.toExponential(2)}</td><td class="${ok?'pass':'fail'}" style="font-weight:bold">${ok?'ok':'FAIL'}</td></tr>`;}
+  h+='</table>';$('vbox').innerHTML=h;$('raw').textContent=JSON.stringify(d,null,2);on('c-raw');}
+loadPicker();window.addEventListener('load',()=>setTimeout(plot,300));
+</script></body></html>
 """
-
-
-def run(argv=None) -> None:
-    import argparse
-    import uvicorn
-
-    p = argparse.ArgumentParser(prog="simval-web", description="simval local dashboard")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8765)
-    a = p.parse_args(argv)
-    uvicorn.run(app, host=a.host, port=a.port)
