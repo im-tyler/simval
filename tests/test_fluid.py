@@ -2,7 +2,6 @@ import json
 import shutil
 from pathlib import Path
 
-import pytest
 
 from simval.fluid import FluidEngine, check_mass_conservation, check_tau_stability, integrate_fluid
 from simval.oracle import validate
