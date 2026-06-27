@@ -125,14 +125,14 @@ canvas{max-width:100%}
 </style></head><body>
 <div class="wrap">
 <h1>simval <span>verify + render</span></h1>
+<p style="color:#888;margin:0 0 .8rem;font-size:.85rem">Verify a simulation against physical invariants. Pick an example below or load your own run directory, then click Verify.</p>
 <div class="bar">
-<select id="picker" onchange="pick()" style="min-width:200px"></select>
-<input id="run" size="44" placeholder="path or pick above" value="examples/openmm_lysozyme">
-<input id="sel" size="16" value="protein and name CA">
+<select id="picker" onchange="pick()" style="min-width:260px"></select>
+<input id="run" size="36" placeholder="or paste a path to your run">
+<input id="sel" size="14" value="protein and name CA" title="Atom selection for MD">
 </div>
 <div class="bar">
-<button class="btn-go" onclick="plot()">Load</button>
-<button class="btn-ghost" onclick="diag()">Diagnose</button>
+<button class="btn-go" onclick="verify()">Verify</button>
 <span id="badge" style="margin-left:auto"></span>
 </div>
 <div class="cards">
@@ -154,10 +154,12 @@ canvas{max-width:100%}
 <script>
 let D=null,sC=null,oC=null,V=null,NF=0;
 const $=id=>document.getElementById(id);
+const LABELS={'examples/openmm_lysozyme':'Molecular Dynamics — Lysozyme (OpenMM)','examples/nbody/two_body':'Gravity — Two-body Kepler orbit','examples/wave/pulse':'Waves — FDTD pulse','examples/fluid/flow':'Fluids — Lattice Boltzmann flow','examples/em/wave':'Electromagnetism — Maxwell pulse','examples/quantum/spin':'Quantum — Spin Rabi oscillation','examples/fep/synthetic':'Free Energy — FEP (synthetic)','examples/qc/h2':'Quantum Chemistry — H2 (PySCF)','examples/qc/bell':'Quantum Circuits — Bell state','examples/kinetics/reaction':'Chemistry — Reaction kinetics','examples/diffusion/heat':'Heat — 1D diffusion','examples/relativistic/particle':'Relativity — Boris pusher'};
 const off=()=>['c-verdict','c-3d','c-s','c-orb','c-fld','c-raw'].forEach(c=>$(c).classList.remove('on'));
 const on=c=>$(c).classList.add('on');
-async function loadPicker(){try{const r=await(await fetch('/api/examples')).json();$('picker').innerHTML='<option value="">-- pick --</option>'+r.examples.map(e=>`<option>${e}</option>`).join('');}catch(e){}}
-function pick(){const v=$('picker').value;if(v){$('run').value=v;plot();}}
+async function loadPicker(){try{const r=await(await fetch('/api/examples')).json();$('picker').innerHTML='<option value="">Pick a simulation to verify...</option>'+r.examples.map(e=>`<option value="${e}">${LABELS[e]||e}</option>`).join('');}catch(e){}}
+function pick(){const v=$('picker').value;if(v){$('run').value=v;verify();}}
+async function verify(){await plot();await diag();}
 async function plot(){
   const r=$('run').value,s=$('sel').value;if(!r)return;
   let d;try{d=await(await fetch(`/api/series?run_dir=${encodeURIComponent(r)}&selection=${encodeURIComponent(s)}`)).json();}catch(e){$('raw').textContent=e;on('c-raw');return;}
