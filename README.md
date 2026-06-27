@@ -32,14 +32,17 @@ A new domain implements `EngineAdapter` (`detect` + `load_context`) and register
 ## Install
 
 ```
-pip install -e .                       # core (numpy-only)
-pip install -e '.[gromacs]'            # MDAnalysis adapter for GROMACS
-pip install -e '.[nbody]'              # REBOUND N-body domain
-pip install -e '.[web]'                # FastAPI dashboard
-pip install -e '.[dev]'                # pytest + httpx
+pip install simval                       # core (numpy-only: waves, fluids, EM, quantum, kinetics, diffusion, relativistic)
+pip install simval[md]                   # + MDAnalysis — read MD trajectories (GROMACS/OpenMM/AMBER/NAMD)
+pip install simval[fep]                  # + alchemlyb + pymbar — free-energy verification (BAR/MBAR)
+pip install simval[nbody]                # + REBOUND — celestial mechanics
+pip install simval[qc]                   # + PySCF — quantum chemistry (HF/DFT)
+pip install simval[quantum]              # + Qiskit — quantum circuits
+pip install simval[web]                  # + FastAPI — local dashboard
+pip install simval[all]                  # everything
 ```
 
-GROMACS itself is needed only to *produce* runs (`brew install gromacs`); simval reads its outputs.
+Simulation engines (GROMACS, OpenMM) are **not** bundled — the user installs them to *produce* runs. simval reads their output. Structure databases (PDB, AlphaFold DB) are fetched on demand via `simval fetch`. The FreeSolv experimental database (642 compounds, CC-BY-4.0) ships in the package.
 
 ## Thresholds
 
