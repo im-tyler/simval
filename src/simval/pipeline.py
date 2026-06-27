@@ -13,6 +13,9 @@ from simval import wave  # noqa: F401  (registers WaveEngine + exposes wave chec
 from simval import fluid  # noqa: F401  (registers FluidEngine + exposes fluid checks)
 from simval import em  # noqa: F401  (registers EMEngine + exposes EM checks)
 from simval import quantum  # noqa: F401  (registers QuantumEngine + exposes quantum checks)
+from simval import fep  # noqa: F401  (registers FepEngine + exposes FEP checks)
+from simval import pyscf_eng  # noqa: F401  (registers PyscfEngine + exposes SCF checks)
+from simval import qiskit_eng  # noqa: F401  (registers QiskitEngine + exposes circuit checks)
 from simval.manifest import build_manifest, write_manifest
 
 
@@ -81,6 +84,21 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
     if "norm" in ctx.extra and "p_up" in ctx.extra:
         results.append(quantum.check_norm_conservation(ctx.extra["norm"]))
         results.append(quantum.check_rabi_oscillates(ctx.extra["p_up"]))
+
+    if "u_nk" in ctx.extra:
+        results.append(fep.check_free_energy(ctx.extra["u_nk"]))
+        results.append(fep.check_overlap(ctx.extra["u_nk"]))
+        results.append(fep.check_hysteresis(ctx.extra["u_nk"], ctx.extra.get("u_nk_reverse")))
+
+    if "scf_energies" in ctx.extra:
+        results.append(pyscf_eng.check_scf_convergence(ctx.extra["scf_energies"]))
+        results.append(pyscf_eng.check_energy_sane(
+            ctx.extra["final_energy"], ctx.extra["n_electrons"]))
+
+    if "statevector" in ctx.extra:
+        results.append(qiskit_eng.check_norm_conservation(ctx.extra["statevector"]))
+        results.append(qiskit_eng.check_measurement_distribution(
+            ctx.extra["probabilities"], ctx.extra.get("expected_probabilities")))
 
     return results
 

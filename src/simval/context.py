@@ -203,6 +203,18 @@ def _load_optional_engines() -> None:
         import simval.quantum  # noqa: F401  (registers QuantumEngine; numpy-only)
     except Exception:
         pass
+    try:
+        import simval.fep  # noqa: F401  (registers FepEngine; needs alchemlyb/pymbar)
+    except Exception:
+        pass
+    try:
+        import simval.pyscf_eng  # noqa: F401  (registers PyscfEngine; needs pyscf)
+    except Exception:
+        pass
+    try:
+        import simval.qiskit_eng  # noqa: F401  (registers QiskitEngine; needs qiskit)
+    except Exception:
+        pass
 
 
 def register_engine(adapter: EngineAdapter) -> None:

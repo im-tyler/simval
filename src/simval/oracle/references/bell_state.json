@@ -1,0 +1,23 @@
+{
+  "name": "bell_state",
+  "description": "Bell state |00>+|11> via H(q0) then CX(q0->q1) on qiskit Aer statevector (2 qubits). Norm conserved exactly; measurement distribution is {00:0.5, 11:0.5}.",
+  "engine": "qc-qiskit",
+  "force_field": "n/a",
+  "selection": "n/a",
+  "reference_metrics": {
+    "norm_drift": 0.0,
+    "tv_distance": 1.1102230246251565e-16
+  },
+  "tolerances": {
+    "norm_drift": [
+      "abs",
+      1e-09
+    ],
+    "tv_distance": [
+      "abs",
+      1e-09
+    ]
+  },
+  "source": "examples/qc/bell (qiskit Aer statevector, 2026-06-27)",
+  "source_hash": ""
+}

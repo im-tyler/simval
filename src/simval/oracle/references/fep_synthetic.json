@@ -1,0 +1,28 @@
+{
+  "name": "fep_synthetic",
+  "description": "Synthetic two-state FEP ladder (1D harmonic oscillators, k_first=4, k_second=1). Analytical reduced free-energy difference F_first - F_second = 0.5*ln(4) = ln(2) ~= 0.6931 kT. Reference metrics computed from simval.fep.synthetic_u_nk(seed=42, n_samples=20000) via MBAR. Oracle checks the estimator recovers deltaG and the overlap gauge passes.",
+  "engine": "fep",
+  "force_field": "n/a",
+  "selection": "n/a",
+  "reference_metrics": {
+    "deltaG_kT": 0.6974040558207548,
+    "uncertainty_kT": 0.004397776043812384,
+    "overlap_min_eigenvalue": 0.16206103381703982
+  },
+  "tolerances": {
+    "deltaG_kT": [
+      "abs",
+      0.05
+    ],
+    "uncertainty_kT": [
+      "abs",
+      0.01
+    ],
+    "overlap_min_eigenvalue": [
+      "abs",
+      0.05
+    ]
+  },
+  "source": "examples/fep/synthetic (synthetic MBAR fixture, 2026-06-27)",
+  "source_hash": ""
+}

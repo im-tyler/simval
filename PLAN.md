@@ -292,6 +292,25 @@ GROMACS (LGPL/GPL), Blender (GPLv3), OpenFOAM (GPLv3) are copyleft. **The plan's
 
 ---
 
+## 13. Build program (2026-06-26) — depth, moat, real engines
+
+**Principle:** build the differentiating verification/oracle/provenance layer; integrate commodity engines, force fields, data, and estimators (never reimplement BAR/MBAR, MD engines, or mirror PDB/AlphaFold).
+
+**Units (parallelizable as self-registering modules, pattern = `simval/nbody.py`/`wave.py`):**
+- **U1 FEP/free-energy verification** (`simval/fep.py`) — wrap `alchemlyb`+`pymbar`; checks: ΔG±uncertainty (BAR/MBAR), overlap, hysteresis, cycle-closure. *Highest leverage — pharma-credible.*
+- **U2 Quantum chemistry** (`simval/pyscf_eng.py`) — wrap `PySCF`; SCF-convergence + basis sanity checks. Real electronic structure (replaces the spin toy).
+- **U3 Quantum circuits** (`simval/qiskit_eng.py`) — wrap `Qiskit Aer` statevector; norm/unitarity + fidelity checks.
+- **U4 Reference-library moat** — integrate published benchmark datasets (D3R, Folding@home, DES-AMBER, alchemlyb example data) as reference cases. *Durable asset; data, not code.*
+- **U5 Real fluid/EM engines** — OpenFOAM/MEEP wraps (replacing the LBM/Yee toys) when install permits.
+- **U6 UI polish** — real frontend (Astro/Next) with animated trajectories, sweep/compare, provenance panels.
+- **U7 Docs + landing + JOSS submission materials.**
+
+**Serial / by-hand (not parallel):** FEP integration-test, UI design, the agent-loop, user outreach.
+
+**Team dispatch:** U1, U2, U3 as parallel code teams (self-contained modules, don't touch shared files); U4 as a research team (dataset discovery); integration + U6/U7 serial after.
+
+---
+
 ## Changelog
 
 - **v0.3** — post-audit. Applied all 14 §C edits from AUDIT.md. Scope narrowed to GROMACS MD for one user (D1); creative cut (A1). Greenfield Python (D2). Cloud LLM Phase 1 (D3). Verification split into Tier 1 (deterministic, buildable — the headline) + Tier 2 (human sign-off) (D4, §1.7). Phase 0 folded into Phase 1 with 2–3 wk timebox + kill criterion (D5, §10). Name reopened (D6); working package name `simval`. Deleted: MCP Gateway/Registry, 5-agent graph, K8s, USD-for-MD, Validator agent. Added: §1.5 user, §1.6 existence proof, §1.7 verification tiers, §2.5 competitive landscape, §10 shelve criteria, §11 licensing. R6 rewritten (drop USD for MD); R9 added (license audit). Diagnostics-first build order inside Phase 1.

@@ -26,6 +26,12 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
         return _em_metrics(run)
     if engine.name == "quantum-spin":
         return _quantum_metrics(run)
+    if engine.name == "fep":
+        return _fep_metrics(run)
+    if engine.name == "qc-pyscf":
+        return _pyscf_metrics(run)
+    if engine.name == "qc-qiskit":
+        return _qiskit_metrics(run)
     return _md_metrics(run, selection)
 
 
@@ -140,6 +146,41 @@ def _quantum_metrics(run: Path) -> dict:
         "norm_drift": float(nc.value),
         "p_up_swing": float(data["p_up"].max() - data["p_up"].min()),
         "n_steps": int(data["n_steps"]),
+    }
+
+
+def _fep_metrics(run: Path) -> dict:
+    from simval.fep import FepEngine, check_free_energy, check_overlap
+
+    ctx = FepEngine().load_context(run, "n/a")
+    u_nk = ctx.extra["u_nk"]
+    fe = check_free_energy(u_nk)
+    ov = check_overlap(u_nk)
+    return {
+        "deltaG": float(fe.value),
+        "overlap_min_eig": float(ov.value),
+    }
+
+
+def _pyscf_metrics(run: Path) -> dict:
+    from simval.pyscf_eng import PyscfEngine
+
+    ctx = PyscfEngine().load_context(run, "n/a")
+    return {
+        "final_energy_hartree": float(ctx.extra["final_energy"]),
+        "converged": 1.0 if ctx.extra["converged"] else 0.0,
+        "n_electrons": int(ctx.extra["n_electrons"]),
+    }
+
+
+def _qiskit_metrics(run: Path) -> dict:
+    from simval.qiskit_eng import QiskitEngine, check_norm_conservation
+
+    ctx = QiskitEngine().load_context(run, "n/a")
+    nm = check_norm_conservation(ctx.extra["statevector"])
+    return {
+        "norm_drift": float(nm.value),
+        "n_qubits": int(ctx.extra["n_qubits"]),
     }
 
 
