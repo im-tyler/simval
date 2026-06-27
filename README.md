@@ -11,13 +11,21 @@ Working name; the folder may be renamed. See `PLAN.md` for the full thesis and `
 - **Reference-oracle**: compare a candidate run against stored canonical references (`validate`) — the agent-loop teacher. Domain-general.
 - **Compare** two runs (the parameter-sweep daily loop).
 
-## Three physics domains via one port
+## Nine physics domains via one port
 
-| Engine | Domain | Headline check |
-|---|---|---|
-| `gromacs` (format-agnostic MD) | molecular dynamics — GROMACS, OpenMM, AMBER, NAMD | conserved-energy drift, RMSD/RMSF, charge neutralization |
-| `nbody-rebound` | celestial mechanics (REBOUND) | energy + angular-momentum + COM-drift conservation |
-| `wave-fdtd` | waves/PDE (built-in leapfrog FDTD) | CFL stability (`c·dt/dx ≤ 1`) + energy boundedness |
+| Engine | Domain | Solver | Headline check |
+|---|---|---|---|
+| `gromacs` (format-agnostic) | molecular dynamics | GROMACS, OpenMM | conserved-energy drift, RMSD/RMSF, charge, H-bonds |
+| `nbody-rebound` | celestial mechanics | REBOUND (IAS15) | energy + angular-momentum + COM conservation |
+| `wave-fdtd` | waves / PDE | built-in leapfrog FDTD | CFL stability + energy boundedness |
+| `fluid-lbm` | fluids / CFD | built-in D2Q9 LBM | BGK τ stability + exact mass conservation |
+| `em-fdtd` | electromagnetism | built-in 2D TMz Yee | Courant condition + EM energy boundedness |
+| `quantum-spin` | quantum dynamics | built-in statevector | norm conservation + Rabi population swing |
+| `fep` | alchemical free energy | alchemlyb + pymbar | MBAR ΔG + overlap + hysteresis |
+| `qc-pyscf` | quantum chemistry | PySCF (HF/DFT) | SCF convergence + energy sanity |
+| `qc-qiskit` | quantum circuits | Qiskit Aer | norm conservation + measurement distribution |
+
+Plus **654 reference anchors** (12 oracle cases + 642 FreeSolv experimental ΔG values, CC-BY-4.0).
 
 A new domain implements `EngineAdapter` (`detect` + `load_context`) and registers itself; universal checks reuse automatically, domain-specific checks fire on `ctx.extra`.
 
@@ -49,9 +57,17 @@ Each check records the threshold it actually used in its `DiagnosticResult` (and
 simval diagnose <run-dir>                       # run diagnostics -> provenance.json
 simval validate <run-dir> --case <name>         # oracle: match/drift vs reference
 simval compare  <run-a> <run-b>                  # sweep diff
+simval sweep    <folder> [--baseline X]          # diagnose every run-dir, tabulate
 simval cases                                     # list reference cases
 simval engines                                   # list registered domain adapters
-simval-web --port 8765                           # local dashboard (Chart.js)
+simval inspect  <run-dir>                        # engine + what the run-dir contains
+simval verify-manifest <provenance.json>         # re-hash files, detect tampering
+simval fetch    <pdb-id|uniprot-id>              # fetch structure from PDB/AlphaFold DB
+simval afold    <uniprot-id>                     # AlphaFold pLDDT confidence profile
+simval export-omex <run-dir>                     # COMBINE archive (.omex)
+simval case-info <name>                          # reference case provenance
+simval freesolv <compound-id> [<computed-dG>]    # FreeSolv experimental ΔG lookup/validation
+simval-web --port 8765                           # local dashboard (3D rendering, charts)
 ```
 
 ## Examples
