@@ -52,6 +52,11 @@ def main(argv=None) -> int:
     vm = sub.add_parser("verify-manifest", help="re-hash files; confirm they match a provenance.json")
     vm.add_argument("manifest")
 
+    ft = sub.add_parser("fetch", help="fetch a structure by PDB ID or UniProt ID (RCSB / AlphaFold DB)")
+    ft.add_argument("identifier")
+    ft.add_argument("out_dir", nargs="?", default=".")
+    ft.add_argument("--source", default=None, choices=["pdb", "alphafold"])
+
     args = parser.parse_args(argv)
 
     if args.cmd == "diagnose":
@@ -149,6 +154,14 @@ def main(argv=None) -> int:
         for f in out["missing"]:
             print(f"  [MISSING]  {f}")
         return 0 if out["ok"] else 1
+
+    if args.cmd == "fetch":
+        from simval.fetch import fetch_structure
+        info = _safe(lambda: fetch_structure(args.identifier, args.out_dir, source=args.source))
+        if info is None:
+            return 1
+        print(f"simval {__version__} | fetched {info['id']} from {info['source']} -> {info['path']} ({info['bytes']} bytes)")
+        return 0
 
     if args.cmd == "validate":
         from simval.oracle import validate as oracle_validate
