@@ -1,12 +1,12 @@
 {
   "name": "diffusion_heat",
-  "description": "1D heat diffusion, Fourier=0.5 (stable), insulated BCs",
+  "description": "1D heat diffusion, Fourier=0.25 (stable), insulated BCs",
   "engine": "heat-diffusion",
   "force_field": "n/a",
   "selection": "n/a",
   "reference_metrics": {
-    "fourier": 0.5,
-    "energy_drift": 0.016923724190194975
+    "fourier": 0.25,
+    "energy_drift": 0.011151037373083742
   },
   "tolerances": {},
   "source": "examples/diffusion/heat",
