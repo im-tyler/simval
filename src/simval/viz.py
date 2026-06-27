@@ -66,3 +66,39 @@ def _downsample_field(field, max_points):
     t_idx = np.linspace(0, nt - 1, min(nt, max_points)).astype(int)
     x_idx = np.linspace(0, nx - 1, min(nx, max_points)).astype(int)
     return f[t_idx][:, x_idx].tolist()
+
+
+def _trajectory_files(run):
+    from simval._util import find_files
+    top = find_files(run, "*.gro", "*.pdb", "*.prmtop", "*.psf", "*.tpr")
+    traj = find_files(run, "*.xtc", "*.dcd", "*.trr", "*.nc")
+    return top, traj
+
+
+def frame_count(run_dir) -> int:
+    import MDAnalysis as mda
+    top, traj = _trajectory_files(Path(run_dir))
+    if not (top and traj):
+        return 0
+    u = mda.Universe(str(top), str(traj))
+    return int(len(u.trajectory))
+
+
+def structure_pdb(run_dir, frame: int = 0, selection: str = "protein") -> str:
+    """Return a PDB string for `selection` at `frame` -- for 3D rendering."""
+    import tempfile
+
+    import MDAnalysis as mda
+    top, traj = _trajectory_files(Path(run_dir))
+    if not (top and traj):
+        raise FileNotFoundError("run-dir has no MD trajectory to render")
+    u = mda.Universe(str(top), str(traj))
+    frame = max(0, min(frame, len(u.trajectory) - 1))
+    u.trajectory[frame]
+    grp = u.select_atoms(selection) if selection else u.atoms
+    with tempfile.NamedTemporaryFile(suffix=".pdb", mode="w", delete=False) as f:
+        path = f.name
+    grp.write(path)
+    pdb = Path(path).read_text()
+    Path(path).unlink()
+    return pdb

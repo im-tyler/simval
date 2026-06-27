@@ -23,6 +23,24 @@ def test_api_engines_and_cases():
     assert "adk_morph" in cases
 
 
+def test_api_structure_and_frames(tmp_path):
+    import shutil
+
+    pytest.importorskip("MDAnalysisTests.datafiles", reason="needs datafiles")
+    from MDAnalysisTests import datafiles
+
+    run = tmp_path / "adk"
+    run.mkdir()
+    shutil.copy(datafiles.XTC, run / "traj.xtc")
+    shutil.copy(datafiles.GRO, run / "conf.gro")
+    client = TestClient(app)
+    fr = client.get(f"/api/frames?run_dir={run}").json()
+    assert fr["n_frames"] == 10
+    st = client.get(f"/api/structure?run_dir={run}&frame=3&selection=protein and name CA").json()
+    assert "ATOM" in st["pdb"]
+    assert "CA" in st["pdb"]
+
+
 def test_bad_input_returns_400_not_500():
     client = TestClient(app)
     r = client.get("/api/inspect?run_dir=/tmp/simval_does_not_exist_xyz")
