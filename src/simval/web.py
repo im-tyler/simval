@@ -96,9 +96,11 @@ _HTML = """<!doctype html>
 <h1>simval <span style="color:#888;font-weight:normal">verify + render</span></h1>
 
 <label>Run directory</label>
-<input id="run" size="70" placeholder="/path/to/run-dir" value="">
-<label>Selection (MD) / pass-through for other domains</label>
-<input id="sel" size="40" value="protein and name CA">
+<input id="run" size="70" placeholder="/path/to/run-dir" value="examples/openmm_lysozyme">
+<div class="row">
+ <label>Analysis <input id="sel" size="22" value="protein and name CA"></label>
+ <label>3D view <input id="view" size="22" value="protein"></label>
+</div>
 
 <div class="row" style="margin:1rem 0">
  <button onclick="plot()">Plot</button>
@@ -150,26 +152,34 @@ async function plot(){
 }
 async function load3d(){
   const run=document.getElementById('run').value;
-  try{
-    const fr=await(await fetch(`/api/frames?run_dir=${encodeURIComponent(run)}`)).json();
-    NFRAMES=Math.max(1,fr.n_frames||1);
-  }catch(e){NFRAMES=1;}
+  try{const fr=await(await fetch(`/api/frames?run_dir=${encodeURIComponent(run)}`)).json(); NFRAMES=fr.n_frames||0;}
+  catch(e){NFRAMES=0;}
+  const label=document.getElementById('frameLabel');
+  if(NFRAMES<=0){
+    document.getElementById('frameSlider').max=0;
+    label.textContent='no MD trajectory to render (MD only)';
+    if(VWR){VWR.removeAllModels();}
+    return;
+  }
   const sl=document.getElementById('frameSlider'); sl.max=NFRAMES-1; sl.value=0;
   CURFRAME=0; await render3d(0);
 }
 async function render3d(frame){
   const run=document.getElementById('run').value;
-  document.getElementById('frameLabel').textContent=`frame ${frame}/${NFRAMES-1}`;
-  let r; try{r=await(await fetch(`/api/structure?run_dir=${encodeURIComponent(run)}&frame=${frame}&selection=${encodeURIComponent(SEL)}`)).json();}
+  const view=document.getElementById('view').value || 'protein';
+  document.getElementById('frameLabel').textContent=`frame ${frame}/${Math.max(0,NFRAMES-1)}`;
+  let r; try{r=await(await fetch(`/api/structure?run_dir=${encodeURIComponent(run)}&frame=${frame}&selection=${encodeURIComponent(view)}`)).json();}
   catch(e){show({error:String(e)});return;}
-  if(!r.pdb){return;}
+  if(!r||!r.pdb){return;}
   const el=document.getElementById('viewer3d');
   if(VWR){VWR.removeAllModels();} else {VWR=$3Dmol.createViewer(el,{backgroundColor:'#ffffff'});}
   VWR.addModel(r.pdb,'pdb');
-  VWR.setStyle({},{cartoon:{color:'spectrum'},licorice:{radius:0.10,colorscheme:'element'}});
+  VWR.setStyle({},{cartoon:{color:'spectrum'}});
+  VWR.setStyle({hetflag:true},{stick:{radius:0.15,colorscheme:'element'}});
   VWR.zoomTo(); VWR.render();
 }
 function onFrame(){const f=+document.getElementById('frameSlider').value; CURFRAME=f; render3d(f);}
+window.addEventListener('load',()=>{ plot(); load3d(); });
 function renderSeries(){
   if(!LAST||!LAST.series) return;
   const key=document.getElementById('metric').value; const data=LAST.series[key]; if(!data) return;
