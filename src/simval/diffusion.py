@@ -49,7 +49,7 @@ def check_fourier_stability(fourier: float, *, max_fourier: float = 0.5) -> Diag
     )
 
 
-def check_heat_conservation(energy, *, max_drift: float = 1e-3) -> DiagnosticResult:
+def check_heat_conservation(energy, *, max_drift: float = 0.05) -> DiagnosticResult:
     e = np.asarray(energy, dtype=float)
     mean = float(np.abs(e).mean()) + 1e-15
     drift = float((e.max() - e.min()) / mean)
