@@ -100,27 +100,28 @@ _HTML = """<!doctype html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/3dmol@2.4.2/build/3Dmol-min.js"></script>
 <style>
-*{box-sizing:border-box;margin:0}
-body{font:14px/1.5 -apple-system,system-ui,sans-serif;background:#0e0e0e;color:#ddd}
-.wrap{max-width:1000px;margin:0 auto;padding:1rem}
-h1{font-size:1.1rem;margin-bottom:.4rem}
-h1 span{color:#555}
-.bar{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem}
-input,select{font:inherit;padding:.3rem .4rem;border:1px solid #333;border-radius:4px;background:#1a1a1a;color:#ddd}
-button{font:inherit;padding:.3rem .7rem;border:none;border-radius:4px;cursor:pointer}
+*{box-sizing:border-box}
+body{font:14px/1.6 -apple-system,system-ui,sans-serif;background:#0e0e0e;color:#ddd;margin:0}
+.wrap{max-width:900px;margin:0 auto;padding:1.5rem 1rem}
+h1{font-size:1.2rem;margin:0 0 .8rem;color:#fff}
+h1 span{color:#555;font-weight:normal}
+.bar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.6rem}
+input,select{font:inherit;padding:.4rem .5rem;border:1px solid #333;border-radius:4px;background:#1a1a1a;color:#ddd}
+button{font:inherit;padding:.4rem .9rem;border:none;border-radius:4px;cursor:pointer}
 .btn-go{background:#2a5;color:#fff}
 .btn-ghost{background:#222;color:#aaa;border:1px solid #333}
-.badge{padding:.1rem .5rem;border-radius:10px;font-size:.7rem;background:#1e3;color:#7df}
+.badge{padding:.15rem .6rem;border-radius:12px;font-size:.72rem;background:#1e3;color:#7df}
 .pass{color:#5b8}.fail{color:#e55}
-.cards{display:flex;flex-direction:column;gap:.6rem;margin-top:.6rem}
-.card{background:#161616;border:1px solid #222;border-radius:6px;padding:.6rem;display:none}
+.cards{display:flex;flex-direction:column;gap:.8rem;margin-top:.8rem}
+.card{background:#161616;border:1px solid #222;border-radius:8px;padding:1rem;display:none}
 .card.on{display:block}
-.card h3{font-size:.75rem;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.3rem}
-.viewer{width:100%;height:300px}
-table{width:100%;border-collapse:collapse;font-size:.8rem}
-td,th{padding:.15rem .3rem;border-bottom:1px solid #222}
-th{color:#666}
-pre{background:#0a0a0a;padding:.4rem;border-radius:4px;overflow:auto;max-height:120px;font-size:11px;color:#888}
+.card h3{font-size:.78rem;color:#666;text-transform:uppercase;letter-spacing:.5px;margin:0 0 .5rem}
+.viewer{width:100%;height:340px;position:relative;background:#000;border-radius:4px}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+td,th{padding:.3rem .4rem;border-bottom:1px solid #222}
+th{color:#666;text-align:left}
+pre{background:#0a0a0a;padding:.6rem;border-radius:4px;overflow:auto;max-height:140px;font-size:11px;color:#888}
+canvas{max-width:100%}
 </style></head><body>
 <div class="wrap">
 <h1>simval <span>verify + render</span></h1>
@@ -161,9 +162,9 @@ async function plot(){
   const r=$('run').value,s=$('sel').value;if(!r)return;
   let d;try{d=await(await fetch(`/api/series?run_dir=${encodeURIComponent(r)}&selection=${encodeURIComponent(s)}`)).json();}catch(e){$('raw').textContent=e;on('c-raw');return;}
   D=d;$('badge').innerHTML=`<span class="badge">${d.engine}</span>`;off();
-  if(d.series&&Object.keys(d.series).length){const m=$('met');m.innerHTML=Object.keys(d.series).map(k=>`<option>${k}</option>`).join('');on('c-s');rSer();}
-  if(d.orbit&&d.orbit.length){on('c-orb');$('os').value=100;rOrb();}
-  if(d.field){on('c-fld');rFld(d.field);}
+  if(d.series&&Object.keys(d.series).length){const m=$('met');m.innerHTML=Object.keys(d.series).map(k=>`<option>${k}</option>`).join('');on('c-s');requestAnimationFrame(()=>rSer());}
+  if(d.orbit&&d.orbit.length){on('c-orb');$('os').value=100;requestAnimationFrame(()=>rOrb());}
+  if(d.field){on('c-fld');requestAnimationFrame(()=>rFld(d.field));}
   try{const fr=await(await fetch(`/api/frames?run_dir=${encodeURIComponent(r)}`)).json();NF=fr.n_frames||0;if(NF>0){$('fs').max=NF-1;$('fs').value=0;await r3d(0);on('c-3d');}}catch(e){}
 }
 async function r3d(f){
