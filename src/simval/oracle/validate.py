@@ -22,6 +22,10 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
         return _wave_metrics(run)
     if engine.name == "fluid-lbm":
         return _fluid_metrics(run)
+    if engine.name == "em-fdtd":
+        return _em_metrics(run)
+    if engine.name == "quantum-spin":
+        return _quantum_metrics(run)
     return _md_metrics(run, selection)
 
 
@@ -106,6 +110,36 @@ def _fluid_metrics(run: Path) -> dict:
         "tau": float(data["tau"]),
         "mass_drift": float(mass.value),
         "tau_in_range": 1.0 if tau.passed else 0.0,
+    }
+
+
+def _em_metrics(run: Path) -> dict:
+    import json
+
+    from simval.em import check_em_energy, integrate_em
+
+    cfg = json.loads((run / "em.json").read_text())
+    data = integrate_em(cfg)
+    eg = check_em_energy(data["energy"], src_on_index=data["src_on"] // 10)
+    return {
+        "courant": float(data["courant"]),
+        "em_energy_growth": float(eg.value),
+        "n_steps": int(data["n_steps"]),
+    }
+
+
+def _quantum_metrics(run: Path) -> dict:
+    import json
+
+    from simval.quantum import check_norm_conservation, evolve_spin
+
+    cfg = json.loads((run / "quantum.json").read_text())
+    data = evolve_spin(cfg)
+    nc = check_norm_conservation(data["norm"])
+    return {
+        "norm_drift": float(nc.value),
+        "p_up_swing": float(data["p_up"].max() - data["p_up"].min()),
+        "n_steps": int(data["n_steps"]),
     }
 
 

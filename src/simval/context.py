@@ -195,6 +195,14 @@ def _load_optional_engines() -> None:
         import simval.fluid  # noqa: F401  (registers FluidEngine; numpy-only)
     except Exception:
         pass
+    try:
+        import simval.em  # noqa: F401  (registers EMEngine; numpy-only)
+    except Exception:
+        pass
+    try:
+        import simval.quantum  # noqa: F401  (registers QuantumEngine; numpy-only)
+    except Exception:
+        pass
 
 
 def register_engine(adapter: EngineAdapter) -> None:

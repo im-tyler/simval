@@ -1,0 +1,24 @@
+{
+  "name": "quantum_spin",
+  "description": "Spin-1/2 on-resonance Rabi (omega0=0, omega1=1), unitary statevector. Norm conserved exactly, population fully flops.",
+  "engine": "quantum-spin",
+  "force_field": "n/a",
+  "selection": "n/a",
+  "reference_metrics": {
+    "norm_drift": 7.349676423018536e-14,
+    "p_up_swing": 0.9999858162125652,
+    "n_steps": 1000
+  },
+  "tolerances": {
+    "norm_drift": [
+      "abs",
+      1e-06
+    ],
+    "p_up_swing": [
+      "abs",
+      0.1
+    ]
+  },
+  "source": "examples/quantum/spin (numpy statevector, 2026-06-26)",
+  "source_hash": ""
+}
