@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use simval in your research, please cite it as below."
+title: "simval — deterministic verification + reference-oracle for computational physics"
+abstract: >-
+  A local-first, LLM-free verification layer and reference-oracle for computational
+  physics simulations (molecular dynamics, N-body, waves, fluids, electromagnetism,
+  quantum). Provides deterministic diagnostics, provenance manifests, and an oracle
+  that validates candidate simulations against canonical reference cases across domains.
+authors:
+  - family-names: "Tyler"
+    given-names: ""
+type: software
+version: "0.1.0"
+license: MIT
+repository-code: "http://100.108.123.49:49152/Tyler/omnilator"
+date-released: "2026-06-26"
+keywords:
+  - molecular dynamics
+  - computational physics
+  - verification
+  - reproducibility
+  - reference oracle

@@ -19,6 +19,7 @@ def _safe(fn):
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="simval", description="Deterministic MD verification + reference oracle")
+    parser.add_argument("--version", action="version", version=f"simval {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("diagnose", help="run diagnostics on a run directory; writes provenance.json")

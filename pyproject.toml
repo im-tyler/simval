@@ -5,11 +5,25 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "simval"
 version = "0.1.0"
-description = "Deterministic verification + reference-oracle for computational physics (MD, N-body, waves). Local-first, LLM-free core."
+description = "Deterministic verification + reference-oracle for computational physics (MD, N-body, waves, fluids, EM, quantum). Local-first, LLM-free core."
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Software Development :: Testing",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
+]
+
+[project.urls]
+Homepage = "http://100.108.123.49:49152/Tyler/omnilator"
+Repository = "http://100.108.123.49:49152/Tyler/omnilator"
+Issues = "http://100.108.123.49:49152/Tyler/omnilator/issues"
 
 [project.scripts]
 simval = "simval.cli:main"

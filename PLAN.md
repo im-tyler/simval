@@ -273,6 +273,25 @@ GROMACS (LGPL/GPL), Blender (GPLv3), OpenFOAM (GPLv3) are copyleft. **The plan's
 
 ---
 
+## 12. Path to a leading product (2026-06-26)
+
+**Realistic target:** the leading OSS *verification + reference-oracle* layer for computational physics — not a leading commercial product (solo; no domain depth, distribution, or capital; AUDIT E3 unchanged).
+
+**The defensible wedge:** ground-truth verification for AI-generated simulations. Surrogate labs (PhysicsX, DeepMind) and the free agent+MCP+Docker composite cannot self-certify their output; deterministic verification against canonical references is the one thing they lack, and its value scales *inversely* with AI volume.
+
+**The compounding moat:** the curated reference-library (canonical benchmark cases per domain) + the deterministic oracle + provenance. Each added reference case is durable and hard to replicate.
+
+**Phases:**
+- **P0 — Publishable.** PyPI package, docs, CITATION, agent-oracle demo. *(this turn)*
+- **P1 — Reference-library moat.** Expand canonical cases across all domains; version + sign them.
+- **P2 — AI-sim verification wedge.** Public oracle API spec + a worked agent-loop demo; "ground-truth for AI sims" positioning.
+- **P3 — Community + publication.** Release on r/compchem, GROMACS forum, MDAnalysis Discord; a JOSS paper (the citation path that makes OSS tools "leading").
+- **P4 — Sustainability.** NIH/NSF OSS grant tracks or sponsored development. Leading OSS is institutionally funded; solo is not durable long-term.
+
+**What code cannot fix (honest):** leading requires users + community + years + likely institutional funding. The multi-domain port is architecture, not a market. This plan raises the ceiling; the floor remains "find one user." Shelve criteria (§10) still apply.
+
+---
+
 ## Changelog
 
 - **v0.3** — post-audit. Applied all 14 §C edits from AUDIT.md. Scope narrowed to GROMACS MD for one user (D1); creative cut (A1). Greenfield Python (D2). Cloud LLM Phase 1 (D3). Verification split into Tier 1 (deterministic, buildable — the headline) + Tier 2 (human sign-off) (D4, §1.7). Phase 0 folded into Phase 1 with 2–3 wk timebox + kill criterion (D5, §10). Name reopened (D6); working package name `simval`. Deleted: MCP Gateway/Registry, 5-agent graph, K8s, USD-for-MD, Validator agent. Added: §1.5 user, §1.6 existence proof, §1.7 verification tiers, §2.5 competitive landscape, §10 shelve criteria, §11 licensing. R6 rewritten (drop USD for MD); R9 added (license audit). Diagnostics-first build order inside Phase 1.
