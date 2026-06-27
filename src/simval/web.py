@@ -128,8 +128,11 @@ canvas{max-width:100%}
 <p style="color:#888;margin:0 0 .8rem;font-size:.85rem">Verify a simulation against physical invariants. Pick an example below or load your own run directory, then click Verify.</p>
 <div class="bar">
 <select id="picker" onchange="pick()" style="min-width:260px"></select>
-<input id="run" size="36" placeholder="or paste a path to your run">
-<input id="sel" size="14" value="protein and name CA" title="Atom selection for MD">
+<span style="color:#555">or</span>
+<input id="run" size="30" placeholder="paste a path">
+<input type="file" id="filepick" webkitdirectory style="display:none" onchange="onFilePick()">
+<button class="btn-ghost" onclick="$('filepick').click()" title="Browse for a folder">Browse...</button>
+<input id="sel" size="12" value="protein and name CA" title="Atom selection for MD">
 </div>
 <div class="bar">
 <button class="btn-go" onclick="verify()">Verify</button>
@@ -159,6 +162,16 @@ const off=()=>['c-verdict','c-3d','c-s','c-orb','c-fld','c-raw'].forEach(c=>$(c)
 const on=c=>$(c).classList.add('on');
 async function loadPicker(){try{const r=await(await fetch('/api/examples')).json();$('picker').innerHTML='<option value="">Pick a simulation to verify...</option>'+r.examples.map(e=>`<option value="${e}">${LABELS[e]||e}</option>`).join('');}catch(e){}}
 function pick(){const v=$('picker').value;if(v){$('run').value=v;verify();}}
+function onFilePick(){
+  const f=$('filepick').files[0];if(!f)return;
+  // webkitdirectory gives relative path from the selected folder
+  const rel=f.webkitRelativePath||f.name;
+  // try to extract just the folder portion; browsers give a fake path
+  const parts=rel.split('/');
+  // the first part is the selected folder name; use the full relative path
+  $('run').value=parts[0]+'/'+parts.slice(1,-1).join('/');
+  verify();
+}
 async function verify(){await plot();await diag();}
 async function plot(){
   const r=$('run').value,s=$('sel').value;if(!r)return;
