@@ -68,6 +68,11 @@ def main(argv=None) -> int:
     ci = sub.add_parser("case-info", help="show provenance + reference metrics for a stored case")
     ci.add_argument("name")
 
+    fs = sub.add_parser("freesolv", help="FreeSolv experimental dG database (642 compounds)")
+    fs.add_argument("compound_id", nargs="?", default=None)
+    fs.add_argument("computed_dG", nargs="?", type=float, default=None)
+    fs.add_argument("--search", default=None)
+
     args = parser.parse_args(argv)
 
     if args.cmd == "diagnose":
@@ -209,6 +214,34 @@ def main(argv=None) -> int:
         print(f"  source: {case.source}")
         print(f"  reference metrics: {case.reference_metrics}")
         print(f"  tolerances: {case.tolerances or '(defaults)'}")
+        return 0
+
+    if args.cmd == "freesolv":
+        from simval.freesolv import check_against_experiment, list_compounds, lookup, search
+        if args.search:
+            hits = search(args.search)
+            print(f"simval {__version__} | {len(hits)} FreeSolv matches for '{args.search}'")
+            for h in hits:
+                print(f"  {h['compound_id']}: {h['iupac'][:40]:40}  expt={h['expt_dG_kcal_mol']:+.2f} ± {h['expt_uncertainty']}")
+        elif args.compound_id and args.computed_dG is not None:
+            r = check_against_experiment(args.computed_dG, args.compound_id)
+            flag = "PASS" if r.passed else "FAIL"
+            print(f"simval {__version__} | FreeSolv {flag} | {r.detail['iupac'][:40]}")
+            print(f"  computed: {r.detail['computed_dG_kcal_mol']:+.2f}  expt: {r.detail['experimental_dG_kcal_mol']:+.2f} ± {r.detail['experimental_uncertainty']}")
+            print(f"  deviation: {r.detail['deviation_kcal_mol']:+.2f} kcal/mol  (tol {r.detail['tolerance_kcal_mol']:.2f})")
+            return 0 if r.passed else 1
+        elif args.compound_id:
+            info = lookup(args.compound_id)
+            print(f"simval {__version__} | FreeSolv {info['compound_id']}")
+            print(f"  {info['iupac']}")
+            print(f"  expt dG = {info['expt_dG_kcal_mol']:+.2f} ± {info['expt_uncertainty']} kcal/mol")
+            print(f"  SMILES: {info['smiles']}")
+        else:
+            n = len(list_compounds())
+            print(f"simval {__version__} | FreeSolv database: {n} compounds (CC-BY-4.0)")
+            print("  simval freesolv <compound_id>           lookup")
+            print("  simval freesolv <compound_id> <dG>      validate")
+            print("  simval freesolv --search <name>         search")
         return 0
 
     if args.cmd == "validate":
