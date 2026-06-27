@@ -1,0 +1,190 @@
+{
+  "created_at": "2026-06-27T21:42:42+00:00",
+  "diagnostics": [
+    {
+      "detail": {
+        "drift_over_run": 0.007298251486032864,
+        "mean_energy": -361392.7587565217,
+        "metric": "relative_range",
+        "n_samples": 25,
+        "n_window": 23,
+        "relative_range": 0.011129387909816395,
+        "skip_fraction": 0.1,
+        "slope_per_step": 114.67544515810002
+      },
+      "name": "energy_drift",
+      "passed": false,
+      "threshold": 0.01,
+      "value": 0.011129387909816395
+    },
+    {
+      "detail": {
+        "final_rmsd_nm": 0.09123140017868947,
+        "max_rmsd_nm": null,
+        "mean_tail_rmsd_nm": 0.08558716262445315,
+        "metric": "tail_drift_fraction",
+        "n_frames": 25,
+        "passes_level": true,
+        "tail_drift_fraction": 0.22299141477704698,
+        "tail_fraction": 0.3,
+        "tail_slope_nm_per_frame": 0.0023856503100475007
+      },
+      "name": "rmsd_plateau",
+      "passed": false,
+      "threshold": 0.1,
+      "value": 0.22299141477704698
+    },
+    {
+      "detail": {
+        "effective_sample_size": 7.154402440517338,
+        "equilibration_index": 24,
+        "fraction_equilibrated": 0.040000000000000036,
+        "min_fraction_equilibrated": 0.5,
+        "n_samples": 25,
+        "scope": "structural equilibration only; NOT thermodynamic/free-energy convergence"
+      },
+      "name": "structural_equilibration",
+      "passed": false,
+      "threshold": 10.0,
+      "value": 7.154402440517338
+    },
+    {
+      "detail": {
+        "high_mobility": [],
+        "max_rmsf_nm": 0.08346583694219589,
+        "mean_rmsf_nm": 0.05089680477976799,
+        "n_above_threshold": 0,
+        "n_residues": 129,
+        "threshold_nm": 0.3,
+        "top10": [
+          {
+            "index": 128,
+            "label": "LEU129",
+            "rmsf_nm": 0.08346583694219589
+          },
+          {
+            "index": 127,
+            "label": "ARG128",
+            "rmsf_nm": 0.0780191719532013
+          },
+          {
+            "index": 125,
+            "label": "GLY126",
+            "rmsf_nm": 0.07761100679636002
+          },
+          {
+            "index": 48,
+            "label": "GLY49",
+            "rmsf_nm": 0.07691595703363419
+          },
+          {
+            "index": 3,
+            "label": "GLY4",
+            "rmsf_nm": 0.07626911997795105
+          },
+          {
+            "index": 101,
+            "label": "GLY102",
+            "rmsf_nm": 0.07623183727264404
+          },
+          {
+            "index": 126,
+            "label": "CYS127",
+            "rmsf_nm": 0.07515450567007065
+          },
+          {
+            "index": 47,
+            "label": "ASP48",
+            "rmsf_nm": 0.07492747902870178
+          },
+          {
+            "index": 46,
+            "label": "THR47",
+            "rmsf_nm": 0.07404788583517075
+          },
+          {
+            "index": 116,
+            "label": "GLY117",
+            "rmsf_nm": 0.07169236242771149
+          }
+        ]
+      },
+      "name": "per_residue_rmsf",
+      "passed": true,
+      "threshold": 0.3,
+      "value": 0.08346583694219589
+    },
+    {
+      "detail": {
+        "box_edges_nm": [
+          6.220700073242187,
+          6.220700073242187,
+          6.220700073242187
+        ],
+        "min_box_edge_nm": 6.220700073242187,
+        "ratio": 6.220700073242187,
+        "rcoulomb_nm": 1.0
+      },
+      "name": "box_cutoff",
+      "passed": true,
+      "threshold": 2.0,
+      "value": 6.220700073242187
+    },
+    {
+      "detail": {
+        "n_clashes": 0,
+        "sample": [],
+        "selection": "not name H*",
+        "threshold_A": 1.0
+      },
+      "name": "steric_clashes",
+      "passed": true,
+      "threshold": 0.0,
+      "value": 0.0
+    },
+    {
+      "detail": {
+        "max": 27,
+        "mean_count": 19.76,
+        "min": 11,
+        "n_frames": 25,
+        "scope": "intramolecular protein H-bonds (donors/acceptors in selection)"
+      },
+      "name": "hydrogen_bonds",
+      "passed": true,
+      "threshold": 5.0,
+      "value": 19.76
+    }
+  ],
+  "files": {
+    "runs/simval_run_demo/energy.xvg": "1c701a253a6d22d0c3f41bb95d04edaf5398674f38b4426102738193ac1718d9",
+    "runs/simval_run_demo/topology.pdb": "89533766852c0335b2438e9a0702c38f9bffd500d671c2784bce14b5e7d125e1"
+  },
+  "image_digest": null,
+  "metadata": {
+    "dt_ps": 0.002,
+    "ensemble": "NVT",
+    "force_field": "amber14",
+    "integrator": "LangevinMiddle",
+    "methods": "MD was performed with OpenMM using the AMBER14 force field and TIP3P water. Integration: LangevinMiddle, dt = 0.002 ps. Nonbonded: PME (1.0 nm cutoff). Ensemble: NVT, 300.0 K. Production: 5.0 ps.",
+    "n_steps": 2500,
+    "temperature_K": 300.0,
+    "water_model": "tip3p"
+  },
+  "methods": "MD was performed with OpenMM using the AMBER14 force field and TIP3P water. Integration: LangevinMiddle, dt = 0.002 ps. Nonbonded: PME (1.0 nm cutoff). Ensemble: NVT, 300.0 K. Production: 5.0 ps.",
+  "notes": "",
+  "params": {
+    "energy_term": "Potential",
+    "engine": "gromacs",
+    "force_field": "amber14",
+    "n_energy_samples": 25,
+    "n_frames": 25,
+    "n_selected_atoms": 129,
+    "selection": "protein and name CA",
+    "water_model": null
+  },
+  "schema": "simval.provenance.v1",
+  "simval_version": "0.1.0",
+  "tier2_signed_off": false,
+  "verdict": "fail"
+}

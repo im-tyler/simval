@@ -204,7 +204,7 @@ def _kinetics_metrics(run: Path) -> dict:
 def _diffusion_metrics(run: Path) -> dict:
     import json
 
-    from simval.diffusion import check_fourier_stability, check_heat_conservation, integrate_diffusion
+    from simval.diffusion import check_heat_conservation, integrate_diffusion
 
     cfg = json.loads((run / "diffusion.json").read_text())
     data = integrate_diffusion(cfg)

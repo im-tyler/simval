@@ -57,6 +57,13 @@ def main(argv=None) -> int:
     ft.add_argument("out_dir", nargs="?", default=".")
     ft.add_argument("--source", default=None, choices=["pdb", "alphafold"])
 
+    rn = sub.add_parser("run", help="run MD via OpenMM + auto-verify (simulate -> diagnose)")
+    rn.add_argument("pdb")
+    rn.add_argument("--out", default="runs/md")
+    rn.add_argument("--steps", type=int, default=5000)
+    rn.add_argument("--dt", type=float, default=0.002)
+    rn.add_argument("--temp", type=float, default=300.0)
+
     af = sub.add_parser("afold", help="AlphaFold pLDDT confidence profile for a UniProt id")
     af.add_argument("uniprot_id")
     af.add_argument("out_dir", nargs="?", default=".")
@@ -178,6 +185,31 @@ def main(argv=None) -> int:
             return 1
         print(f"simval {__version__} | fetched {info['id']} from {info['source']} -> {info['path']} ({info['bytes']} bytes)")
         return 0
+
+    if args.cmd == "run":
+        from simval.mdrun import run_md
+        pdb = args.pdb
+        if pdb.endswith(".pdb") or "/" in pdb:
+            pdb_path = Path(pdb)
+        else:
+            from simval.fetch import fetch_structure
+            info = _safe(lambda: fetch_structure(pdb, args.out, source="pdb"))
+            if info is None:
+                return 1
+            pdb_path = Path(info["path"])
+        out = _safe(lambda: run_md(pdb_path, args.out, steps=args.steps, dt=args.dt, temp=args.temp))
+        if out is None:
+            return 1
+        print(f"simval {__version__} | MD complete -> {out}")
+        manifest = _safe(lambda: run_diagnose(str(out), selection="protein and name CA"))
+        if manifest is None:
+            return 1
+        verdict = manifest["verdict"]
+        print(f"simval {__version__} | verdict: {verdict.upper()} | {len(manifest['diagnostics'])} checks")
+        for r in manifest["diagnostics"]:
+            flag = "PASS" if r["passed"] else "FAIL"
+            print(f"  [{flag}] {r['name']:<24} value={r['value']:.4g}")
+        return 0 if verdict == "pass" else 1
 
     if args.cmd == "afold":
         from simval.afold import check_plddt_profile, fetch_plddt

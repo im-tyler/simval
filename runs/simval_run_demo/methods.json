@@ -1,0 +1,10 @@
+{
+  "force_field": "amber14",
+  "water_model": "tip3p",
+  "integrator": "LangevinMiddle",
+  "dt_ps": 0.002,
+  "temperature_K": 300.0,
+  "n_steps": 2500,
+  "ensemble": "NVT",
+  "methods": "MD was performed with OpenMM using the AMBER14 force field and TIP3P water. Integration: LangevinMiddle, dt = 0.002 ps. Nonbonded: PME (1.0 nm cutoff). Ensemble: NVT, 300.0 K. Production: 5.0 ps."
+}
