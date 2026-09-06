@@ -216,6 +216,10 @@ def _load_optional_engines() -> None:
     except Exception:
         pass
     try:
+        import simval.ontos  # noqa: F401  (registers OntosEngine; stdlib-only)
+    except Exception:
+        pass
+    try:
         import simval.kinetics  # noqa: F401  (numpy-only)
     except Exception:
         pass

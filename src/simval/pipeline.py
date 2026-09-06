@@ -16,6 +16,7 @@ from simval import quantum  # noqa: F401  (registers QuantumEngine + exposes qua
 from simval import fep  # noqa: F401  (registers FepEngine + exposes FEP checks)
 from simval import pyscf_eng  # noqa: F401  (registers PyscfEngine + exposes SCF checks)
 from simval import qiskit_eng  # noqa: F401  (registers QiskitEngine + exposes circuit checks)
+from simval import ontos  # noqa: F401  (registers OntosEngine + exposes ontos stream checks)
 from simval import kinetics  # noqa: F401
 from simval import diffusion  # noqa: F401
 from simval import relativistic  # noqa: F401
@@ -66,6 +67,10 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
 
     if "L_magnitude" in ctx.extra:
         results.append(nbody.check_angular_momentum(ctx.extra["L_magnitude"], **T.kwargs_for("angular_momentum", t)))
+    if "ontos_summary" in ctx.extra:
+        summary = ctx.extra["ontos_summary"]
+        results.append(ontos.check_reference_match(summary))
+        results.append(ontos.check_tick_monotonicity(summary))
     if "com" in ctx.extra:
         results.append(nbody.check_com_drift(ctx.extra["com"], **T.kwargs_for("com_drift", t)))
 
