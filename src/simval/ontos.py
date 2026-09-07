@@ -365,3 +365,36 @@ class OntosEngine(EngineAdapter):
 
 
 register_engine(OntosEngine())
+
+
+def _main(argv=None) -> int:
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="python -m simval.ontos",
+        description="Verify an ontos record stream against this independent reference",
+    )
+    parser.add_argument("stream", help="path to a .stream file")
+    parser.add_argument("seed", type=int, help="world seed the stream was produced with")
+    args = parser.parse_args(argv)
+    try:
+        summary = verify_stream(args.stream, args.seed)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"simval.ontos: error: {e}", file=sys.stderr)
+        return 2
+    ok = summary["mismatch_count"] == 0 and summary["tick_monotonic"]
+    print(
+        f"ontos stream: {'OK' if ok else 'MISMATCH'} | ticks={summary['ticks_verified']} "
+        f"records={summary['records_compared']} mismatches={summary['mismatch_count']} "
+        f"final_population={summary['final_population']} "
+        f"final_world_hash={summary['final_world_hash']:016x}"
+    )
+    for m in summary["mismatches"]:
+        print(f"  MISMATCH: tick={m['tick']} region={m['region']} field={m['field']} "
+              f"stream={m['expected']} computed={m['actual']}")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
