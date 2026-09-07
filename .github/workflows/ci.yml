@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python -m pip install pytest
+      - run: python -m pip install numpy pytest
       - name: Run test suite (optional-engine deps excluded)
         run: |
           PYTHONPATH=src python -m pytest tests/ -q \
