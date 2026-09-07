@@ -74,6 +74,7 @@ simval export-omex <run-dir>                     # COMBINE archive (.omex)
 simval case-info <name>                          # reference case provenance
 simval freesolv <compound-id> [<computed-dG>]    # FreeSolv experimental ΔG lookup/validation
 simval-web --port 8765                           # local dashboard (3D rendering, charts)
+python -m simval.ontos <stream> <seed>           # verify an ontos record stream (stdlib-only)
 ```
 
 ## Examples
