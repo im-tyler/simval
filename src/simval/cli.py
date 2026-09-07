@@ -49,6 +49,11 @@ def main(argv=None) -> int:
     sw.add_argument("--baseline", default=None)
     sw.add_argument("--selection", default="protein and name CA")
 
+    orc = sub.add_parser("orchestrate", help="run an ontos parameter grid; verify + tabulate every run")
+    orc.add_argument("--grid", required=True, help="JSON (or YAML) list of run specs; format in simval.orchestrate")
+    orc.add_argument("--ontos-bin", default=None, help="path to the ontos binary (default: $ONTOS_BIN or PATH)")
+    orc.add_argument("--out", default=None, help="write the results dict as JSON to this path")
+
     vm = sub.add_parser("verify-manifest", help="re-hash files; confirm they match a provenance.json")
     vm.add_argument("manifest")
 
@@ -164,6 +169,37 @@ def main(argv=None) -> int:
                     cells.append(f"{v:>14.3g}")
             print(f"  {r['run']:<20} " + " ".join(cells))
         return 0
+
+    if args.cmd == "orchestrate":
+        import json
+
+        from simval.orchestrate import load_grid, outliers, run_grid, tabulate
+        specs = _safe(lambda: load_grid(args.grid))
+        if specs is None:
+            return 1
+        results = _safe(lambda: run_grid(specs, ontos_bin=args.ontos_bin))
+        if results is None:
+            return 1
+        print(f"simval {__version__} | orchestrate {args.grid} | {len(results)} runs")
+        print(tabulate(results), end="")
+        ol = outliers(results)
+        if ol:
+            print("  outliers (drift metric > median + k*MAD):")
+            for o in ol:
+                print(f"    {o['run']:<20} {o['metric']:<26} value={o['value']:.3g} "
+                      f"median={o['median']:.3g} mad={o['mad']:.3g}")
+        else:
+            print("  outliers: none")
+        if args.out:
+            Path(args.out).write_text(
+                json.dumps({"grid": args.grid, "runs": results, "outliers": ol}, indent=2) + "\n"
+            )
+            print(f"  results -> {args.out}")
+        clean = all(
+            "_error" not in r and r.get("mismatch_count", 1) == 0 and not r.get("checks_failed")
+            for r in results
+        )
+        return 0 if clean else 1
 
     if args.cmd == "verify-manifest":
         from simval.manifest import verify_manifest
