@@ -139,13 +139,36 @@ def cholesky_solve(g, b):
     return c
 
 
+def subset_energy(bodies) -> float:
+    """Section 15 energy over a body list (KE in id order, then PE i<j)."""
+    ke = 0.0
+    for b in bodies:
+        ke += 0.5 * b["mass"] * (b["vx"] * b["vx"] + b["vy"] * b["vy"])
+    pe = 0.0
+    n = len(bodies)
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx = bodies[j]["x"] - bodies[i]["x"]
+            dy = bodies[j]["y"] - bodies[i]["y"]
+            s2 = dx * dx + dy * dy + EPS2
+            pe -= bodies[i]["mass"] * bodies[j]["mass"] / math.sqrt(s2)
+    return ke + pe
+
+
 class GravityWorld:
     def __init__(self, seed: int, count: int) -> None:
+        self.seed = seed
         self.bodies = initial_conditions(seed, count)
         self.coarse = [None] * count
         self.body_region = [UNMANAGED] * count
         self.region_coarse = [False] * 4
-        self.events: dict[int, list[tuple[int, bool]]] = {}
+        self.region_collapsed = [None] * 4
+        self.body_collapsed = [None] * count
+        self.reconstructed: set[int] = set()
+        self.last_collapses = []
+        self.last_expansion = None
+        self.expand_count = 0
+        self.events: dict[int, list[tuple[int, int]]] = {}
         self.tick = 0
         px = 0.0
         py = 0.0
@@ -155,10 +178,22 @@ class GravityWorld:
         self.px = px
         self.py = py
 
-    def schedule(self, tick: int, region: int, to_coarse: bool) -> None:
-        self.events.setdefault(tick, []).append((region, to_coarse))
+    def schedule(self, tick: int, region: int, level: int) -> None:
+        self.events.setdefault(tick, []).append((region, level))
 
     def _state_at(self, i: int, t: int) -> dict:
+        collapsed = self.body_collapsed[i]
+        if collapsed is not None:
+            rec = self.region_collapsed[collapsed]
+            jx, jy = rec["jitter"][i]
+            return {
+                "id": i,
+                "mass": self.bodies[i]["mass"],
+                "x": rec["com_x"] + jx,
+                "y": rec["com_y"] + jy,
+                "vx": rec["vcom_x"],
+                "vy": rec["vcom_y"],
+            }
         b = dict(self.bodies[i])
         fit = self.coarse[i]
         if fit is not None:
@@ -248,6 +283,138 @@ class GravityWorld:
                 self.body_region[i] = UNMANAGED
         self.region_coarse[region] = False
 
+    def _collapse(self, region: int, t: int) -> None:
+        for i in range(len(self.bodies)):
+            if self.coarse[i] is not None and self.body_region[i] == region:
+                self.bodies[i] = self._state_at(i, t)
+                self.coarse[i] = None
+                self.body_region[i] = UNMANAGED
+        self.region_coarse[region] = False
+        x0 = (region % 2) * 64.0
+        y0 = (region // 2) * 64.0
+        members = [
+            i
+            for i in range(len(self.bodies))
+            if self.bodies[i]["x"] >= x0
+            and self.bodies[i]["x"] < x0 + 64.0
+            and self.bodies[i]["y"] >= y0
+            and self.bodies[i]["y"] < y0 + 64.0
+        ]
+        mass = 0.0
+        mx = 0.0
+        my = 0.0
+        px = 0.0
+        py = 0.0
+        for i in members:
+            b = self.bodies[i]
+            mass += b["mass"]
+            mx += b["mass"] * b["x"]
+            my += b["mass"] * b["y"]
+            px += b["mass"] * b["vx"]
+            py += b["mass"] * b["vy"]
+        if members:
+            com_x = mx / mass
+            com_y = my / mass
+            vcom_x = px / mass
+            vcom_y = py / mass
+        else:
+            com_x = 0.0
+            com_y = 0.0
+            vcom_x = 0.0
+            vcom_y = 0.0
+        rng = SplitMix64(self.seed ^ ((region * 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF))
+        jitter = {}
+        for i in members:
+            jx = (rng.next() * TWO_POW_NEG64 - 0.5) * 8.0
+            jy = (rng.next() * TWO_POW_NEG64 - 0.5) * 8.0
+            jitter[i] = (jx, jy)
+        spread = {}
+        for i in members[:-1]:
+            sx = (rng.next() * TWO_POW_NEG64 - 0.5) * 0.1
+            sy = (rng.next() * TWO_POW_NEG64 - 0.5) * 0.1
+            spread[i] = (sx, sy)
+        syn = [
+            {
+                "id": i,
+                "mass": self.bodies[i]["mass"],
+                "x": com_x + jitter[i][0],
+                "y": com_y + jitter[i][1],
+                "vx": vcom_x,
+                "vy": vcom_y,
+            }
+            for i in members
+        ]
+        rec = {
+            "tick": t,
+            "region": region,
+            "count": len(members),
+            "mass": mass,
+            "com_x": com_x,
+            "com_y": com_y,
+            "vcom_x": vcom_x,
+            "vcom_y": vcom_y,
+            "px": px,
+            "py": py,
+            "energy": subset_energy([self.bodies[i] for i in members]) if members else 0.0,
+            "syn_energy": subset_energy(syn),
+            "members": members,
+            "jitter": jitter,
+            "spread": spread,
+        }
+        self.region_collapsed[region] = rec
+        self.last_collapses.append(rec)
+        for i in members:
+            self.body_collapsed[i] = region
+            self.body_region[i] = region
+
+    def _expand(self, region: int, t: int) -> None:
+        rec = self.region_collapsed[region]
+        members = rec["members"]
+        states = []
+        if members:
+            sum_mvx = 0.0
+            sum_mvy = 0.0
+            for i in members[:-1]:
+                jx, jy = rec["jitter"][i]
+                sx, sy = rec["spread"][i]
+                b = {
+                    "id": i,
+                    "mass": self.bodies[i]["mass"],
+                    "x": rec["com_x"] + jx,
+                    "y": rec["com_y"] + jy,
+                    "vx": rec["vcom_x"] + sx,
+                    "vy": rec["vcom_y"] + sy,
+                }
+                states.append(b)
+                sum_mvx += b["mass"] * b["vx"]
+                sum_mvy += b["mass"] * b["vy"]
+            last = members[-1]
+            m_last = self.bodies[last]["mass"]
+            states.append(
+                {
+                    "id": last,
+                    "mass": m_last,
+                    "x": rec["com_x"] + rec["jitter"][last][0],
+                    "y": rec["com_y"] + rec["jitter"][last][1],
+                    "vx": (rec["px"] - sum_mvx) / m_last,
+                    "vy": (rec["py"] - sum_mvy) / m_last,
+                }
+            )
+            for b in states:
+                self.bodies[b["id"]] = b
+                self.body_collapsed[b["id"]] = None
+                self.body_region[b["id"]] = UNMANAGED
+                self.reconstructed.add(b["id"])
+        self.region_collapsed[region] = None
+        self.expand_count += 1
+        self.last_expansion = {
+            "tick": t,
+            "region": region,
+            "target_px": rec["px"],
+            "target_py": rec["py"],
+            "bodies": [dict(b) for b in states],
+        }
+
     def _refit(self, region: int, t: int) -> None:
         x0 = (region % 2) * 64.0
         y0 = (region // 2) * 64.0
@@ -277,13 +444,19 @@ class GravityWorld:
 
     def step(self) -> None:
         entering = self.tick + 1
-        for region, to_coarse in self.events.pop(entering, []):
-            if to_coarse:
-                self._demote(region, entering)
-            else:
-                self._promote(region, entering)
+        for region, level in self.events.pop(entering, []):
+            if level == 0:
+                if self.region_collapsed[region] is None:
+                    self._demote(region, entering)
+            elif level == 1:
+                if self.region_collapsed[region] is not None:
+                    self._expand(region, entering)
+                else:
+                    self._promote(region, entering)
+            elif self.region_collapsed[region] is None:
+                self._collapse(region, entering)
         for region in range(4):
-            if self.region_coarse[region]:
+            if self.region_coarse[region] and self.region_collapsed[region] is None:
                 ended = any(
                     self.body_region[i] == region
                     and self.coarse[i] is not None
@@ -295,31 +468,37 @@ class GravityWorld:
 
         n = len(self.bodies)
         coarse = [self.coarse[i] is not None for i in range(n)]
+        frozen = [coarse[i] or self.body_collapsed[i] is not None for i in range(n)]
+        monopoles = [
+            self.region_collapsed[r]
+            for r in range(4)
+            if self.region_collapsed[r] is not None and self.region_collapsed[r]["mass"] > 0.0
+        ]
         half = DT * 0.5
         view = [self._state_at(i, entering) for i in range(n)]
-        ax_ff, ay_ff, ax_fc, ay_fc = accel_split(view, coarse)
+        ax_ff, ay_ff, ax_fc, ay_fc = accel_split(view, coarse, self.body_collapsed, monopoles)
         for i in range(n):
-            if not coarse[i]:
+            if not frozen[i]:
                 self.bodies[i]["vx"] += ax_ff[i] * half
                 self.bodies[i]["vy"] += ay_ff[i] * half
         for i in range(n):
-            if not coarse[i]:
+            if not frozen[i]:
                 self.bodies[i]["vx"] += ax_fc[i] * half
                 self.bodies[i]["vy"] += ay_fc[i] * half
                 self.px += self.bodies[i]["mass"] * (ax_fc[i] * half)
                 self.py += self.bodies[i]["mass"] * (ay_fc[i] * half)
         for i in range(n):
-            if not coarse[i]:
+            if not frozen[i]:
                 self.bodies[i]["x"] += self.bodies[i]["vx"] * DT
                 self.bodies[i]["y"] += self.bodies[i]["vy"] * DT
         view = [self._state_at(i, entering) for i in range(n)]
-        ax_ff, ay_ff, ax_fc, ay_fc = accel_split(view, coarse)
+        ax_ff, ay_ff, ax_fc, ay_fc = accel_split(view, coarse, self.body_collapsed, monopoles)
         for i in range(n):
-            if not coarse[i]:
+            if not frozen[i]:
                 self.bodies[i]["vx"] += ax_ff[i] * half
                 self.bodies[i]["vy"] += ay_ff[i] * half
         for i in range(n):
-            if not coarse[i]:
+            if not frozen[i]:
                 self.bodies[i]["vx"] += ax_fc[i] * half
                 self.bodies[i]["vy"] += ay_fc[i] * half
                 self.px += self.bodies[i]["mass"] * (ax_fc[i] * half)
@@ -332,47 +511,58 @@ class GravityWorld:
         fine = 0
         coarse_n = 0
         mass = 0.0
-        ke = 0.0
         for b in view:
-            if self.coarse[b["id"]] is not None:
+            if self.coarse[b["id"]] is not None or self.body_collapsed[b["id"]] is not None:
                 coarse_n += 1
             else:
                 fine += 1
             mass += b["mass"]
-            ke += 0.5 * b["mass"] * (b["vx"] * b["vx"] + b["vy"] * b["vy"])
-        pe = 0.0
-        for i in range(n):
-            for j in range(i + 1, n):
-                dx = view[j]["x"] - view[i]["x"]
-                dy = view[j]["y"] - view[i]["y"]
-                s2 = dx * dx + dy * dy + EPS2
-                pe -= view[i]["mass"] * view[j]["mass"] / math.sqrt(s2)
-        return fine, coarse_n, mass, self.px, self.py, ke + pe
+        return fine, coarse_n, mass, self.px, self.py, subset_energy(view)
 
     def state_bytes(self, i: int) -> bytes:
         b = self._state_at(i, self.tick)
-        level = 0 if self.coarse[i] is not None else 1
+        if self.body_collapsed[i] is not None:
+            level = 2
+        elif self.coarse[i] is not None:
+            level = 0
+        else:
+            level = 1
         return struct.pack(
             "<IdddddB", b["id"], b["x"], b["y"], b["vx"], b["vy"], b["mass"], level
         )
 
     def emitted_state(self, i: int):
         b = self._state_at(i, self.tick)
-        level = 0 if self.coarse[i] is not None else 1
-        region = self.body_region[i] if self.coarse[i] is not None else region_at(b["x"], b["y"])
+        if self.body_collapsed[i] is not None:
+            level = 2
+            region = self.body_collapsed[i]
+        elif self.coarse[i] is not None:
+            level = 0
+            region = self.body_region[i]
+        else:
+            level = 1
+            region = region_at(b["x"], b["y"])
         return b, region, level
 
     def region_hash(self, region: int):
         members = []
         for i in range(len(self.bodies)):
-            if self.coarse[i] is not None:
+            if self.body_collapsed[i] is not None:
+                if self.body_collapsed[i] == region:
+                    members.append(i)
+            elif self.coarse[i] is not None:
                 if self.body_region[i] == region:
                     members.append(i)
             else:
                 b = self._state_at(i, self.tick)
                 if region_at(b["x"], b["y"]) == region:
                     members.append(i)
-        level = 0 if self.region_coarse[region] else 1
+        if self.region_collapsed[region] is not None:
+            level = 2
+        elif self.region_coarse[region]:
+            level = 0
+        else:
+            level = 1
         payload = bytes([level])
         for i in sorted(members):
             payload += self.state_bytes(i)
@@ -385,7 +575,7 @@ class GravityWorld:
         return fnv1a64(payload)
 
 
-def accel_split(view, coarse):
+def accel_split(view, coarse, body_collapsed=None, monopoles=None):
     n = len(view)
     ax_ff = [0.0] * n
     ay_ff = [0.0] * n
@@ -393,6 +583,8 @@ def accel_split(view, coarse):
     ay_fc = [0.0] * n
     for i in range(n):
         for j in range(i + 1, n):
+            if body_collapsed is not None and (body_collapsed[i] is not None or body_collapsed[j] is not None):
+                continue
             dx = view[j]["x"] - view[i]["x"]
             dy = view[j]["y"] - view[i]["y"]
             s2 = dx * dx + dy * dy + EPS2
@@ -411,11 +603,30 @@ def accel_split(view, coarse):
             elif ci and not cj:
                 ax_fc[j] -= view[i]["mass"] * fx
                 ay_fc[j] -= view[i]["mass"] * fy
+    if monopoles:
+        for m in monopoles:
+            for i in range(n):
+                if coarse[i] or (body_collapsed is not None and body_collapsed[i] is not None):
+                    continue
+                dx = m["com_x"] - view[i]["x"]
+                dy = m["com_y"] - view[i]["y"]
+                s2 = dx * dx + dy * dy + EPS2
+                inv3 = 1.0 / (s2 * math.sqrt(s2))
+                fx = G * inv3 * dx
+                fy = G * inv3 * dy
+                ax_fc[i] += m["mass"] * fx
+                ay_fc[i] += m["mass"] * fy
     return ax_ff, ay_ff, ax_fc, ay_fc
 
 
-def expected_zoom_policy(seed: int, offset: int, ticks: int, start_levels=None):
-    """Recompute the spec section 18 zoom-policy event sequence."""
+def expected_zoom_policy(seed: int, offset: int, ticks: int, cli_events=None):
+    """Recompute the spec section 18 zoom-policy event sequence.
+
+    cli_events: scheduled (tick, region, level) triples applied to the
+    level-state machine in stream order before the policy evaluates at
+    each boundary (levels: 0 fine, 1 coarse, 2 collapsed; demote on a
+    collapsed region is a no-op per spec 19).
+    """
     rng = SplitMix64(seed ^ offset)
     points = []
     for _ in range(2):
@@ -433,9 +644,23 @@ def expected_zoom_policy(seed: int, offset: int, ticks: int, start_levels=None):
         f = (t - (1 + 64 * k)) / 64.0
         return (p0[0] + (p1[0] - p0[0]) * f, p0[1] + (p1[1] - p0[1]) * f)
 
-    coarse = list(start_levels) if start_levels else [False] * 4
+    cli = {}
+    for ev in cli_events or []:
+        t, region, lv = ev
+        cli.setdefault(t, []).append((region, lv))
+    modes = [0, 0, 0, 0]
     events = []
+    pending_cli = sorted(cli.items())
     for t in range(17, ticks + 1, 16):
+        while pending_cli and pending_cli[0][0] <= t:
+            for region, lv in pending_cli.pop(0)[1]:
+                if lv == 2:
+                    modes[region] = 2
+                elif lv == 0:
+                    if modes[region] == 0:
+                        modes[region] = 1
+                else:
+                    modes[region] = 0
         fx, fy = focus(t)
         for region in range(4):
             x0 = (region % 2) * 64.0
@@ -443,11 +668,11 @@ def expected_zoom_policy(seed: int, offset: int, ticks: int, start_levels=None):
             cx = min(max(fx, x0), x0 + 64.0)
             cy = min(max(fy, y0), y0 + 64.0)
             d = math.sqrt((fx - cx) * (fx - cx) + (fy - cy) * (fy - cy))
-            if not coarse[region] and d > 48.0:
-                coarse[region] = True
+            if modes[region] == 0 and d > 48.0:
+                modes[region] = 1
                 events.append((t, region, 0))
-            elif coarse[region] and d < 24.0:
-                coarse[region] = False
+            elif modes[region] != 0 and d < 24.0:
+                modes[region] = 0
                 events.append((t, region, 1))
     return events
 
@@ -471,7 +696,7 @@ def check_zoom_policy(records, seed: int, offset: int, *, cli_events=None) -> Di
                 stream_events.append((tick, ry * 2 + rx, lv))
             pending.clear()
             last_tick = tick
-    policy = expected_zoom_policy(seed, offset, last_tick)
+    policy = expected_zoom_policy(seed, offset, last_tick, cli_events=cli_events)
     policy_set = set(policy)
     cli_set = set(cli_events or [])
     ok = True
@@ -570,6 +795,8 @@ def parse_stream_v2(path):
             records.append(("flip", tick, x, y))
         elif tag == 4:
             region_x, region_y, level = struct.unpack_from("<IIB", data, offset)
+            if level > 2:
+                raise ValueError(f"invalid region level {level} at offset {offset - 1}")
             offset += 9
             records.append(("level", region_x, region_y, level))
         elif tag == 5:
@@ -584,6 +811,10 @@ def parse_stream_v2(path):
             vals = struct.unpack_from("<QQQdddd", data, offset)
             offset += 56
             records.append(("totals", *vals))
+        elif tag == 8:
+            vals = struct.unpack_from("<QIIQdddddd", data, offset)
+            offset += 72
+            records.append(("collapsed", *vals))
         else:
             raise ValueError(f"unknown record tag {tag} at offset {offset - 1}")
     return (world_w, world_h, body_count), records
@@ -600,17 +831,23 @@ def verify_stream_gravity(path, seed: int) -> dict:
     compared = 0
     last_tick = 0
     pending = []
+    pending_collapsed = []
     max_pos_dev = 0.0
+    post_exp_dev = 0.0
+    collapse_events = 0
+    collapse_energy_deltas = []
 
     for record in records:
         kind = record[0]
         if kind == "level":
             _, rx, ry, level = record
-            pending.append((ry * 2 + rx, level == 0))
+            pending.append((ry * 2 + rx, level))
+        elif kind == "collapsed":
+            pending_collapsed.append(record)
         elif kind == "tick":
             _, tick = record
-            for region, to_coarse in pending:
-                world.schedule(world.tick + 1, region, to_coarse)
+            for region, level in pending:
+                world.schedule(world.tick + 1, region, level)
             pending.clear()
             world.step()
             reference.step()
@@ -618,11 +855,58 @@ def verify_stream_gravity(path, seed: int) -> dict:
             if tick != world.tick:
                 mismatches.append({"tick": tick, "field": "tick", "expected": tick, "actual": world.tick})
             for i in range(len(world.bodies)):
+                if world.body_collapsed[i] is not None:
+                    continue
                 b = world._state_at(i, world.tick)
                 r = reference.bodies[i]
                 dev = max(abs(b["x"] - r["x"]), abs(b["y"] - r["y"]))
-                if dev > max_pos_dev:
+                if world.expand_count > 0 and dev > post_exp_dev:
+                    post_exp_dev = dev
+                if i not in world.reconstructed and dev > max_pos_dev:
                     max_pos_dev = dev
+            for cres in pending_collapsed:
+                _, tick_c, rx, ry, count, mass, com_x, com_y, px, py, energy = cres
+                compared += 1
+                collapse_events += 1
+                region = ry * 2 + rx
+                local = next((c for c in world.last_collapses if c["region"] == region), None)
+                if local is None:
+                    mismatches.append(
+                        {
+                            "tick": tick_c,
+                            "field": "collapse_record",
+                            "expected": "no local collapse",
+                            "actual": None,
+                        }
+                    )
+                    continue
+                world.last_collapses.remove(local)
+                if count != local["count"]:
+                    mismatches.append(
+                        {"tick": tick_c, "field": "collapse_count", "expected": count, "actual": local["count"]}
+                    )
+                for name, got, want in (
+                    ("collapse_mass", mass, local["mass"]),
+                    ("collapse_com_x", com_x, local["com_x"]),
+                    ("collapse_com_y", com_y, local["com_y"]),
+                    ("collapse_px", px, local["px"]),
+                    ("collapse_py", py, local["py"]),
+                    ("collapse_energy", energy, local["energy"]),
+                ):
+                    if struct.pack("<d", got) != struct.pack("<d", want):
+                        mismatches.append({"tick": tick_c, "field": name, "expected": got, "actual": want})
+                collapse_energy_deltas.append((tick_c, region, energy, local["syn_energy"]))
+            pending_collapsed.clear()
+            for local in world.last_collapses:
+                mismatches.append(
+                    {
+                        "tick": tick,
+                        "field": "collapse_record",
+                        "expected": None,
+                        "actual": f"missing RegionCollapsed for region {local['region']}",
+                    }
+                )
+            world.last_collapses.clear()
         elif kind == "snapshot":
             compared += 1
         elif kind == "totals":
@@ -674,8 +958,29 @@ def verify_stream_gravity(path, seed: int) -> dict:
                     }
                 )
 
-    _, _, ref_mass, ref_px, ref_py, ref_e0 = reference.totals()
-    _, _, _, end_px, end_py, end_e = world.totals()
+    tracked = [
+        i
+        for i in range(len(world.bodies))
+        if world.body_collapsed[i] is None and i not in world.reconstructed
+    ]
+    if len(tracked) == len(world.bodies):
+        _, _, ref_mass, ref_px, ref_py, ref_e0 = reference.totals()
+        _, _, _, end_px, end_py, end_e = world.totals()
+    else:
+        wsub = [world._state_at(i, world.tick) for i in tracked]
+        rsub = [reference.bodies[i] for i in tracked]
+        end_px = 0.0
+        end_py = 0.0
+        for b in wsub:
+            end_px += b["mass"] * b["vx"]
+            end_py += b["mass"] * b["vy"]
+        ref_px = 0.0
+        ref_py = 0.0
+        for b in rsub:
+            ref_px += b["mass"] * b["vx"]
+            ref_py += b["mass"] * b["vy"]
+        end_e = subset_energy(wsub)
+        ref_e0 = subset_energy(rsub)
     ref_scale = max(abs(ref_px), abs(ref_py), 1e-30)
     return {
         "ticks_verified": last_tick,
@@ -685,6 +990,10 @@ def verify_stream_gravity(path, seed: int) -> dict:
         "max_position_deviation": max_pos_dev,
         "momentum_drift": max(abs(end_px - ref_px), abs(end_py - ref_py)) / ref_scale,
         "energy_drift": abs(end_e - ref_e0) / abs(ref_e0),
+        "collapse_events": collapse_events,
+        "expand_events": world.expand_count,
+        "collapse_energy_deltas": collapse_energy_deltas,
+        "post_expansion_deviation": post_exp_dev,
         "final_world_hash": world.world_hash(),
     }
 
@@ -719,6 +1028,44 @@ def check_bounded_drift(summary: dict, *, pos_tol: float = 5e-2, mom_tol: float 
             "energy_drift_relative": energy,
             "tolerances": {"position": pos_tol, "momentum": mom_tol, "energy": energy_tol},
         },
+    )
+
+
+def check_reconstruction_error(summary: dict, *, pos_tol: float = 64.0) -> DiagnosticResult:
+    """Spec section 19: post-expansion continuation vs the all-fine reference.
+
+    Reconstruction positions are com + jitter, so the honest bound is
+    region-scale. Bodies that were never reconstructed are excluded (their
+    deviation is window/monopole drift, owned by check_bounded_drift).
+    """
+    expanded = summary.get("expand_events", 0) > 0
+    dev = summary.get("post_expansion_deviation", 0.0)
+    return DiagnosticResult(
+        name="ontos_reconstruction_error",
+        passed=(not expanded) or dev <= pos_tol,
+        threshold=float(pos_tol),
+        value=float(dev),
+        detail={
+            "post_expansion_deviation": dev,
+            "expansions": summary.get("expand_events", 0),
+            "note": None if expanded else "no expansion in stream; reconstruction error unmeasured",
+        },
+    )
+
+
+def check_collapse_energy(summary: dict, *, tol: float = 8.0) -> DiagnosticResult:
+    """Spec section 19: synthesized-set energy vs the collapse record's energy."""
+    worst = 0.0
+    deltas = summary.get("collapse_energy_deltas", [])
+    for _, _, rec_e, syn_e in deltas:
+        rel = abs(syn_e - rec_e) / max(abs(rec_e), 1.0)
+        worst = max(worst, rel)
+    return DiagnosticResult(
+        name="ontos_collapse_energy",
+        passed=worst <= tol,
+        threshold=float(tol),
+        value=float(worst),
+        detail={"collapse_events": len(deltas), "worst_relative_delta": worst},
     )
 
 

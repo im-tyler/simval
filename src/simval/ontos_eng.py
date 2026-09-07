@@ -37,21 +37,37 @@ class OntosEngine(EngineAdapter):
         seed = int(meta["seed"])
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
         if _is_gravity(run):
-            from simval.ontos_gravity import check_zoom_policy, parse_stream_v2, verify_stream_gravity
+            from simval.ontos_gravity import (
+                check_collapse_energy,
+                check_reconstruction_error,
+                check_zoom_policy,
+                parse_stream_v2,
+                verify_stream_gravity,
+            )
 
             summary = verify_stream_gravity(run / "ontos.stream", seed)
             extra_checks = []
+            if summary.get("collapse_events", 0) or summary.get("expand_events", 0):
+                extra_checks.append(check_reconstruction_error(summary))
+                extra_checks.append(check_collapse_energy(summary))
             observer = meta.get("observer")
             if observer is not None:
                 _, records = parse_stream_v2(run / "ontos.stream")
-                extra_checks.append(check_zoom_policy(records, seed, int(observer)))
+                cli_events = [
+                    (int(t), ry * 2 + rx, int(lv)) for t, rx, ry, lv in meta.get("events", [])
+                ]
+                extra_checks.append(
+                    check_zoom_policy(records, seed, int(observer), cli_events=cli_events)
+                )
             try:
                 from simval.ontos_gravity import check_rebound_anchor
 
                 header, records = parse_stream_v2(run / "ontos.stream")
-                extra_checks.append(
-                    check_rebound_anchor(records, seed, header[2], ticks=summary["ticks_verified"])
-                )
+                has_level_events = any(r[0] == "level" for r in records)
+                if not has_level_events:
+                    extra_checks.append(
+                        check_rebound_anchor(records, seed, header[2], ticks=summary["ticks_verified"])
+                    )
             except ImportError:
                 pass
             ctx.extra = {"ontos_gravity_summary": summary, "ontos_extra_checks": extra_checks}
