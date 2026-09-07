@@ -10,6 +10,7 @@ from simval.context import select_engine
 from simval.ontos import (
     FNV_OFFSET_BASIS,
     OntosEngine,
+    ReferenceWorld,
     check_reference_match,
     check_tick_monotonicity,
     fnv1a64,
@@ -101,3 +102,64 @@ def test_wrong_seed_fails_on_promote_fixture(tmp_path):
     summary_wrong = verify_stream(run / "ontos.stream", 43)
     assert summary_wrong["mismatch_count"] > 0
     assert not check_reference_match(summary_wrong).passed
+
+
+def _emit_stream(path, world, schedule, ticks):
+    """Serialize a reference run to stream bytes per spec section 9."""
+    out = bytearray(b"ONTO")
+    out += struct.pack("<III", 1, 128, 128)
+    for rx, ry, level in schedule:
+        world.set_level(rx, ry, "fine" if level else "coarse")
+        out += b"\x04" + struct.pack("<IIB", rx, ry, level)
+    for _ in range(ticks):
+        world.step()
+        out += b"\x01" + struct.pack("<Q", world.tick)
+        out += b"\x02" + struct.pack("<Q", world.population())
+        for ry in (0, 1):
+            for rx in (0, 1):
+                region = world.regions[world.region_index(rx, ry)]
+                out += b"\x05" + struct.pack(
+                    "<QIIBQQ",
+                    world.tick,
+                    rx,
+                    ry,
+                    1 if region.level == "fine" else 0,
+                    region.population(),
+                    region.hash(),
+                )
+    Path(path).write_bytes(bytes(out))
+
+
+def test_randomized_schedules_self_consistent(tmp_path):
+    import random
+
+    rng = random.Random(20260906)
+    for trial in range(12):
+        seed = rng.randrange(2**64)
+        ops = rng.randrange(0, 5)
+        schedule = [
+            (rng.randrange(2), rng.randrange(2), rng.randrange(2)) for _ in range(ops)
+        ]
+        ticks = rng.randrange(1, 40)
+        world = ReferenceWorld(seed=seed)
+        world.seed_r_pentomino()
+        stream = tmp_path / f"case_{trial}.stream"
+        _emit_stream(stream, world, schedule, ticks)
+        summary = verify_stream(stream, seed)
+        assert summary["mismatch_count"] == 0, (trial, schedule, summary["mismatches"])
+        assert summary["tick_monotonic"] is True
+        assert summary["ticks_verified"] == ticks
+
+
+def test_module_cli_verifies_and_rejects(tmp_path, capsys):
+    from simval.ontos import _main
+
+    assert _main([str(R_PENTOMINO / "ontos.stream"), "42"]) == 0
+    out = capsys.readouterr().out
+    assert "OK" in out and "mismatches=0" in out
+    data = bytearray((R_PENTOMINO / "ontos.stream").read_bytes())
+    data[-1] ^= 0xFF
+    corrupt = tmp_path / "corrupt.stream"
+    corrupt.write_bytes(bytes(data))
+    assert _main([str(corrupt), "42"]) == 1
+    assert _main([str(tmp_path / "missing.stream"), "42"]) == 2
