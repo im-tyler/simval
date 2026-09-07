@@ -19,7 +19,7 @@ Working name; the folder may be renamed. See `PLAN.md` for the full thesis and `
 |---|---|---|---|
 | `gromacs` (format-agnostic) | molecular dynamics | GROMACS, OpenMM | conserved-energy drift, RMSD/RMSF, charge, H-bonds |
 | `nbody-rebound` | celestial mechanics | REBOUND (IAS15) | energy + angular-momentum + COM conservation |
-| `ontos` | discrete multiscale (Phase 0) | independent spec reimplementation | stream records vs reference, bit-exact FNV state hashes |
+| `ontos` | discrete multiscale (life v1) + nbody gravity with Chebyshev ephemeris windows (v2) | independent spec reimplementation | stream records vs reference, bit-exact state hashes, bounded window drift |
 | `wave-fdtd` | waves / PDE | built-in leapfrog FDTD | CFL stability + energy boundedness |
 | `fluid-lbm` | fluids / CFD | built-in D2Q9 LBM | BGK τ stability + exact mass conservation |
 | `em-fdtd` | electromagnetism | built-in 2D TMz Yee | Courant condition + EM energy boundedness |
