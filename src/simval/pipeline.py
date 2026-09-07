@@ -71,6 +71,12 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
         summary = ctx.extra["ontos_summary"]
         results.append(ontos.check_reference_match(summary))
         results.append(ontos.check_tick_monotonicity(summary))
+    if "ontos_gravity_summary" in ctx.extra:
+        from simval import ontos_gravity
+
+        summary = ctx.extra["ontos_gravity_summary"]
+        results.append(ontos_gravity.check_reference_match_gravity(summary))
+        results.append(ontos_gravity.check_bounded_drift(summary))
     if "com" in ctx.extra:
         results.append(nbody.check_com_drift(ctx.extra["com"], **T.kwargs_for("com_drift", t)))
 
