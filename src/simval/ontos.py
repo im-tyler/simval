@@ -2,19 +2,21 @@
 
 Implements the Ontos stream format and simulation rules strictly from
 ontos docs/STREAM_SPEC.md (the normative contract) and verifies recorded
-ontos streams against this reimplementation. Pure stdlib, no numpy.
+ontos streams against this reimplementation. Pure stdlib, no numpy —
+`python3 -m simval.ontos <stream> <seed>` must run on a bare interpreter.
+The engine adapter (numpy-adjacent plumbing) lives in simval.ontos_eng.
 
 The reference deliberately shares no code with the Rust simulator: any
 divergence between the two is a finding, not a nuisance.
 """
 from __future__ import annotations
 
-import json
+import argparse
 import struct
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from simval.context import EngineAdapter, RunContext, register_engine
 from simval.result import DiagnosticResult
 
 REGION_FINE = 64
@@ -342,35 +344,7 @@ def check_tick_monotonicity(summary: dict) -> DiagnosticResult:
     )
 
 
-class OntosEngine(EngineAdapter):
-    name = "ontos"
-
-    def detect(self, run: Path) -> bool:
-        return (run / "ontos.stream").exists() and (run / "ontos.json").exists()
-
-    def load_context(self, run: Path, selection: str) -> RunContext:
-        meta = json.loads((run / "ontos.json").read_text())
-        if "seed" not in meta:
-            raise ValueError("ontos.json must contain an integer 'seed'")
-        summary = verify_stream(run / "ontos.stream", int(meta["seed"]))
-        ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
-        ctx.extra = {"ontos_summary": summary}
-        ctx.run_params = {
-            "engine": self.name,
-            "seed": int(meta["seed"]),
-            "domain": "discrete-multiscale",
-            "ticks": summary["ticks_verified"],
-        }
-        return ctx
-
-
-register_engine(OntosEngine())
-
-
 def _main(argv=None) -> int:
-    import argparse
-    import sys
-
     parser = argparse.ArgumentParser(
         prog="python -m simval.ontos",
         description="Verify an ontos record stream against this independent reference",

@@ -216,7 +216,7 @@ def _load_optional_engines() -> None:
     except Exception:
         pass
     try:
-        import simval.ontos  # noqa: F401  (registers OntosEngine; stdlib-only)
+        import simval.ontos_eng  # noqa: F401  (registers OntosEngine; reference is stdlib-only)
     except Exception:
         pass
     try:

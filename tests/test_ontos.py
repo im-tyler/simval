@@ -9,7 +9,6 @@ import pytest
 from simval.context import select_engine
 from simval.ontos import (
     FNV_OFFSET_BASIS,
-    OntosEngine,
     ReferenceWorld,
     check_reference_match,
     check_tick_monotonicity,
@@ -17,6 +16,7 @@ from simval.ontos import (
     parse_stream,
     verify_stream,
 )
+from simval.ontos_eng import OntosEngine
 from simval.pipeline import run_checks
 
 EXAMPLES = Path(__file__).parent.parent / "examples" / "ontos"
