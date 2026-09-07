@@ -1,0 +1,9 @@
+; minimal topology fixture for metadata-extraction tests
+#include "amber99sb-ildn.ff/forcefield.itp"
+#include "amber99sb-ildn.ff/tip3p.itp"
+
+[ system ]
+Test system
+
+[ molecules ]
+Protein_A 1
