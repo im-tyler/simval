@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        python-version: ["3.11", "3.13"]
+        exclude:
+          - os: macos-14
+            python-version: "3.11"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install pytest
+      - name: Run test suite (optional-engine deps excluded)
+        run: |
+          PYTHONPATH=src python -m pytest tests/ -q \
+            --ignore=tests/test_md_multiformat.py \
+            --deselect tests/test_afold.py::test_fetch_plddt_real
+
+  cross-verify:
+    runs-on: ubuntu-latest
+    name: verify ontos-generated streams with this oracle
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: im-tyler/ontos
+          path: ontos
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build ontos and verify its streams
+        run: |
+          set -e
+          cargo build --release --manifest-path ontos/Cargo.toml
+          ontos=ontos/target/release/ontos
+          verify() {
+            $ontos --ticks "$1" --seed "$2" "${@:3}" --out /tmp/case.stream
+            PYTHONPATH=src python -m simval.ontos /tmp/case.stream "$2"
+          }
+          verify 64 42
+          verify 64 42 --demote 1 0
+          verify 200 7 --demote 1 0 --demote 0 1 --promote 1 0
