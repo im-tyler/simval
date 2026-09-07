@@ -21,6 +21,7 @@ CASES = [
     ("window", 42, 120),
     ("refit", 7, 120),
     ("multi", 3, 150),
+    ("observer", 5, 300),
 ]
 
 
@@ -101,3 +102,59 @@ def test_wrong_seed_fails(tmp_path):
     shutil.copytree(EXAMPLES / "window", run)
     summary = verify_stream_gravity(run / "ontos.stream", 43)
     assert summary["mismatch_count"] > 0
+
+
+def test_zoom_policy_matches_and_detects_tampering(tmp_path):
+    import shutil
+
+    from simval.ontos_gravity import check_zoom_policy, parse_stream_v2
+
+    _, records = parse_stream_v2(EXAMPLES / "observer" / "ontos.stream")
+    result = check_zoom_policy(records, 5, 777)
+    assert result.passed, result.detail
+    assert result.detail["policy_events"] >= 3
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(EXAMPLES / "observer", run)
+    data = bytearray((run / "ontos.stream").read_bytes())
+    sizes = {1: 9, 2: 9, 3: 17, 4: 10, 5: 34, 6: 55, 7: 57}
+    off = 20
+    flipped = False
+    while off < len(data):
+        tag = data[off]
+        if tag == 4 and not flipped:
+            data[off + 9] ^= 0x01
+            flipped = True
+            break
+        off += sizes[tag]
+    (run / "ontos.stream").write_bytes(bytes(data))
+    _, records = parse_stream_v2(run / "ontos.stream")
+    result = check_zoom_policy(records, 5, 777)
+    assert not result.passed
+
+
+def test_observer_engine_diagnose(tmp_path):
+    import shutil
+
+    from simval.context import select_engine as sel
+    from simval.pipeline import run_checks as rc
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(EXAMPLES / "observer", run)
+    engine = sel(run)
+    ctx = engine.load_context(run, selection="default")
+    results = rc(ctx)
+    names = {r.name for r in results}
+    assert "ontos_zoom_policy" in names
+    zoom = next(r for r in results if r.name == "ontos_zoom_policy")
+    assert zoom.passed
+
+
+def test_rebound_anchor_agrees():
+    rebound = pytest.importorskip("rebound")
+    from simval.ontos_gravity import check_rebound_anchor, parse_stream_v2
+
+    _, records = parse_stream_v2(EXAMPLES / "all_fine" / "ontos.stream")
+    result = check_rebound_anchor(records, 42, 8)
+    assert result.passed, result.detail
+    assert result.value < 1e-4

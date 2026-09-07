@@ -162,7 +162,7 @@ class GravityWorld:
         b = dict(self.bodies[i])
         fit = self.coarse[i]
         if fit is not None:
-            s = -1.0 + (t - fit["t0"]) / 32.0
+            s = -1.0 + (t - fit["t0"]) / 16.0
             b["x"] = clenshaw(fit["c"][0], s)
             b["y"] = clenshaw(fit["c"][1], s)
             b["vx"] = clenshaw(fit["c"][2], s)
@@ -412,6 +412,135 @@ def accel_split(view, coarse):
                 ax_fc[j] -= view[i]["mass"] * fx
                 ay_fc[j] -= view[i]["mass"] * fy
     return ax_ff, ay_ff, ax_fc, ay_fc
+
+
+def expected_zoom_policy(seed: int, offset: int, ticks: int, start_levels=None):
+    """Recompute the spec section 18 zoom-policy event sequence."""
+    rng = SplitMix64(seed ^ offset)
+    points = []
+    for _ in range(2):
+        u0 = rng.next()
+        u1 = rng.next()
+        points.append((16.0 + u0 * TWO_POW_NEG64 * 96.0, 16.0 + u1 * TWO_POW_NEG64 * 96.0))
+
+    def focus(t):
+        k = (t - 1) // 64
+        while len(points) < k + 2:
+            u0 = rng.next()
+            u1 = rng.next()
+            points.append((16.0 + u0 * TWO_POW_NEG64 * 96.0, 16.0 + u1 * TWO_POW_NEG64 * 96.0))
+        p0, p1 = points[k], points[k + 1]
+        f = (t - (1 + 64 * k)) / 64.0
+        return (p0[0] + (p1[0] - p0[0]) * f, p0[1] + (p1[1] - p0[1]) * f)
+
+    coarse = list(start_levels) if start_levels else [False] * 4
+    events = []
+    for t in range(17, ticks + 1, 16):
+        fx, fy = focus(t)
+        for region in range(4):
+            x0 = (region % 2) * 64.0
+            y0 = (region // 2) * 64.0
+            cx = min(max(fx, x0), x0 + 64.0)
+            cy = min(max(fy, y0), y0 + 64.0)
+            d = math.sqrt((fx - cx) * (fx - cx) + (fy - cy) * (fy - cy))
+            if not coarse[region] and d > 48.0:
+                coarse[region] = True
+                events.append((t, region, 0))
+            elif coarse[region] and d < 24.0:
+                coarse[region] = False
+                events.append((t, region, 1))
+    return events
+
+
+def check_zoom_policy(records, seed: int, offset: int, *, cli_events=None) -> DiagnosticResult:
+    """Verify the stream's RegionLevel sequence matches the zoom policy.
+
+    cli_events: optional iterable of (tick, region, level) events scheduled
+    via --demote-at/--promote-at; they are interleaved with policy events
+    in stream order and excluded from the policy expectation.
+    """
+    stream_events = []
+    pending = []
+    last_tick = 0
+    for record in records:
+        if record[0] == "level":
+            pending.append((record[1], record[2], record[3]))
+        elif record[0] == "tick":
+            _, tick = record
+            for rx, ry, lv in pending:
+                stream_events.append((tick, ry * 2 + rx, lv))
+            pending.clear()
+            last_tick = tick
+    policy = expected_zoom_policy(seed, offset, last_tick)
+    policy_set = set(policy)
+    cli_set = set(cli_events or [])
+    ok = True
+    detail = {"stream_events": len(stream_events), "policy_events": len(policy)}
+    for ev in stream_events:
+        if ev in policy_set or ev in cli_set:
+            continue
+        ok = False
+        detail["unexpected"] = ev
+        break
+    for ev in policy:
+        if ev not in stream_events:
+            ok = False
+            detail["missing"] = ev
+            break
+    return DiagnosticResult(
+        name="ontos_zoom_policy",
+        passed=ok,
+        threshold=0.0,
+        value=0.0 if ok else 1.0,
+        detail=detail,
+    )
+
+
+def rebound_positions(seed: int, body_count: int, ticks: int):
+    """REBOUND anchor: same ICs, same softening/dt, independent integrator."""
+    import rebound as rb
+
+    ics = initial_conditions(seed, body_count)
+    sim = rb.Simulation()
+    sim.G = 1.0
+    sim.softening = 1.0
+    sim.dt = DT
+    sim.integrator = "LEAPFROG"
+    for b in ics:
+        sim.add(m=b["mass"], x=b["x"], y=b["y"], z=0.0, vx=b["vx"], vy=b["vy"], vz=0.0)
+    sim.integrate(ticks * DT)
+    return [(p.x, p.y) for p in sim.particles]
+
+
+def check_rebound_anchor(records, seed: int, body_count: int, *, ticks: int = None, tol: float = 1e-4) -> DiagnosticResult:
+    """Compare the stream's final tick positions against a REBOUND run."""
+    last_tick = 0
+    positions = {}
+    for record in records:
+        if record[0] == "tick":
+            last_tick = record[1]
+        elif record[0] == "body":
+            _, tick, bid, region, level, x, y, vx, vy, mass = record
+            positions[bid] = (x, y)
+    if not positions:
+        raise ValueError("stream carries no BodyState records")
+    if len(positions) != body_count:
+        raise ValueError(f"stream has {len(positions)} bodies, expected {body_count}")
+    ref = rebound_positions(seed, body_count, ticks if ticks is not None else last_tick)
+    max_dev = 0.0
+    scale = 0.0
+    for bid, (rx, ry) in enumerate(ref):
+        sx, sy = positions[bid]
+        max_dev = max(max_dev, abs(sx - rx), abs(sy - ry))
+        scale = max(scale, abs(rx), abs(ry))
+    rel = max_dev / (scale if scale > 1e-30 else 1e-30)
+    return DiagnosticResult(
+        name="ontos_rebound_anchor",
+        passed=rel <= tol,
+        threshold=float(tol),
+        value=float(rel),
+        detail={"ticks": last_tick, "max_abs_deviation": max_dev, "relative": rel},
+    )
 
 
 def parse_stream_v2(path):

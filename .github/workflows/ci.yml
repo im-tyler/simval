@@ -56,3 +56,16 @@ jobs:
           verify 100 42 --mode gravity --bodies 8
           verify 120 42 --mode gravity --bodies 8 --demote-at 20 0 0 --promote-at 80 0 0
           verify 150 3 --mode gravity --bodies 10 --demote-at 10 0 1 --demote-at 40 2 0 --promote-at 100 0 1
+          verify 300 5 --mode gravity --bodies 10 --observer 777
+
+  rebound-anchor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install numpy pytest "rebound>=3.27"
+      - name: REBOUND anchor check against ontos-generated streams
+        run: |
+          PYTHONPATH=src python -m pytest tests/test_ontos_gravity.py -q -p no:cacheprovider -k "rebound"

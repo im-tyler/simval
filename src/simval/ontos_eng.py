@@ -37,14 +37,31 @@ class OntosEngine(EngineAdapter):
         seed = int(meta["seed"])
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
         if _is_gravity(run):
+            from simval.ontos_gravity import check_zoom_policy, parse_stream_v2, verify_stream_gravity
+
             summary = verify_stream_gravity(run / "ontos.stream", seed)
-            ctx.extra = {"ontos_gravity_summary": summary}
+            extra_checks = []
+            observer = meta.get("observer")
+            if observer is not None:
+                _, records = parse_stream_v2(run / "ontos.stream")
+                extra_checks.append(check_zoom_policy(records, seed, int(observer)))
+            try:
+                from simval.ontos_gravity import check_rebound_anchor
+
+                header, records = parse_stream_v2(run / "ontos.stream")
+                extra_checks.append(
+                    check_rebound_anchor(records, seed, header[2], ticks=summary["ticks_verified"])
+                )
+            except ImportError:
+                pass
+            ctx.extra = {"ontos_gravity_summary": summary, "ontos_extra_checks": extra_checks}
             ctx.run_params = {
                 "engine": self.name,
                 "mode": "gravity",
                 "seed": seed,
                 "domain": "nbody-multiscale",
                 "ticks": summary["ticks_verified"],
+                **({"observer": int(observer)} if observer is not None else {}),
             }
         else:
             summary = verify_stream(run / "ontos.stream", seed)

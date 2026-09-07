@@ -77,6 +77,8 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
         summary = ctx.extra["ontos_gravity_summary"]
         results.append(ontos_gravity.check_reference_match_gravity(summary))
         results.append(ontos_gravity.check_bounded_drift(summary))
+    for check in ctx.extra.get("ontos_extra_checks", []):
+        results.append(check)
     if "com" in ctx.extra:
         results.append(nbody.check_com_drift(ctx.extra["com"], **T.kwargs_for("com_drift", t)))
 
