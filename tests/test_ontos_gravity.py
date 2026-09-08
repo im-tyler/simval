@@ -14,6 +14,7 @@ from simval.ontos_gravity import (
     SplitMix64,
     check_bounded_drift,
     check_collapse_energy,
+    check_contact_resolution,
     check_multipole_match,
     check_reconstruction_error,
     check_reference_match_gravity,
@@ -172,14 +173,17 @@ def test_rebound_anchor_agrees():
 # --- Section 19: collapse and reconstruction ---
 
 
-def _emit_gravity_stream(path, seed, count, schedule, ticks):
+def _emit_gravity_stream(path, seed, count, schedule, ticks, contacts=False):
     """Serialize a reference gravity run per the spec section 16 emission contract.
 
     schedule: list of (tick, region_index, level) with level 0 demote,
     1 promote/expand, 2 collapse. Collapse events additionally emit the
     section 19 RegionCollapsed record before that tick's TickHeader.
+    contacts: spec section 21 mode — emits Contact records (tag 10) in
+    generation order before that tick's TickHeader.
     """
     world = GravityWorld(seed, count)
+    world.contacts = contacts
     out = bytearray(b"ONTO")
     out += struct.pack("<IIII", 2, 128, 128, count)
     events = {}
@@ -218,6 +222,17 @@ def _emit_gravity_stream(path, seed, count, schedule, ticks):
                     c["qyy"],
                 )
         world.last_collapses.clear()
+        for c in world.last_contacts:
+            out += b"\x0a" + struct.pack(
+                "<QIIddd",
+                c["tick"],
+                c["a"],
+                c["b"],
+                c["jn"],
+                c["cx"],
+                c["cy"],
+            )
+        world.last_contacts.clear()
         out += b"\x01" + struct.pack("<Q", world.tick)
         out += b"\x02" + struct.pack("<Q", count)
         fine, coarse_n, mass, px, py, energy = world.totals()
@@ -587,4 +602,121 @@ def test_engine_diagnose_multipole_run(tmp_path):
     names = {r.name for r in results}
     assert "ontos_multipole_match" in names
     assert "ontos_reconstruction_error" in names
+    assert all(r.passed for r in results if r.name.startswith("ontos_"))
+
+
+# --- Section 21: contact dynamics ---
+
+CONTACT_EXAMPLES = Path(__file__).parent.parent / "examples" / "ontos_contact"
+
+
+def test_contact_emitter_reproduces_recorded_stream(tmp_path):
+    out = tmp_path / "contact.stream"
+    _emit_gravity_stream(out, 11, 32, [], 400, contacts=True)
+    assert out.read_bytes() == (CONTACT_EXAMPLES / "contact" / "ontos.stream").read_bytes()
+
+
+def test_contact_recorded_stream_verifies():
+    summary = verify_stream_gravity(CONTACT_EXAMPLES / "contact" / "ontos.stream", 11)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["ticks_verified"] == 400
+    assert summary["contact_events"] == 5
+    assert summary["contact_run"] is True
+    assert check_contact_resolution(summary).passed
+    assert summary["contact_worst_vn_after"] < 1e-12
+    assert summary["contact_min_jn"] > 0.0
+
+
+def test_contact_collapse_composition_verifies():
+    summary = verify_stream_gravity(
+        CONTACT_EXAMPLES / "contact_collapse" / "ontos.stream", 11
+    )
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["contact_events"] == 5
+    assert summary["collapse_events"] == 1
+    assert summary["expand_events"] == 1
+    assert check_contact_resolution(summary).passed
+    assert check_multipole_match(summary).passed
+
+
+def test_contact_ledger_untouched_by_impulses():
+    world = GravityWorld(11, 32)
+    world.contacts = True
+    px0, py0 = world.px, world.py
+    impulses = 0
+    for _ in range(400):
+        world.step()
+        impulses += len(world.last_contacts)
+        world.last_contacts.clear()
+    assert impulses >= 3
+    assert world.px == px0
+    assert world.py == py0
+
+
+def test_contact_physical_momentum_drifts_only_by_rounding():
+    world = GravityWorld(11, 32)
+    world.contacts = True
+
+    def sum_mv(w):
+        px = 0.0
+        py = 0.0
+        for b in w.bodies:
+            px += b["mass"] * b["vx"]
+            py += b["mass"] * b["vy"]
+        return px, py
+
+    px0, py0 = sum_mv(world)
+    for _ in range(200):
+        world.step()
+        world.last_contacts.clear()
+    px1, py1 = sum_mv(world)
+    scale = max(abs(px0), abs(py0), 1e-30)
+    drift = max(abs(px1 - px0), abs(py1 - py0)) / scale
+    assert drift < 1e-11, drift
+
+
+def test_contact_no_records_without_overlaps(tmp_path):
+    stream = tmp_path / "sparse.stream"
+    _emit_gravity_stream(stream, 1, 8, [], 200, contacts=True)
+    summary = verify_stream_gravity(stream, 1)
+    assert summary["mismatch_count"] == 0
+    assert summary["contact_events"] == 0
+    assert summary["contact_run"] is False
+    assert check_contact_resolution(summary).passed
+
+
+def test_tampered_contact_record_fails(tmp_path):
+    stream = tmp_path / "ontos.stream"
+    _emit_gravity_stream(stream, 11, 32, [], 60, contacts=True)
+    data = bytearray(stream.read_bytes())
+    sizes = {1: 9, 2: 9, 3: 17, 4: 10, 5: 34, 6: 55, 7: 57, 8: 73, 9: 57, 10: 41}
+    off = 20
+    flipped = False
+    while off < len(data):
+        tag = data[off]
+        if tag == 10 and not flipped:
+            data[off + 17] ^= 0x01  # low byte of jn
+            flipped = True
+            break
+        off += sizes[tag]
+    assert flipped
+    corrupt = tmp_path / "corrupt.stream"
+    corrupt.write_bytes(bytes(data))
+    summary = verify_stream_gravity(corrupt, 11)
+    assert summary["mismatch_count"] > 0
+    assert not check_reference_match_gravity(summary).passed
+
+
+def test_engine_diagnose_contact_run(tmp_path):
+    import shutil
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(CONTACT_EXAMPLES / "contact", run)
+    engine = select_engine(run)
+    assert engine.name == "ontos"
+    ctx = engine.load_context(run, selection="default")
+    results = run_checks(ctx)
+    names = {r.name for r in results}
+    assert "ontos_contact_resolution" in names
+    assert "ontos_audio_match" in names
     assert all(r.passed for r in results if r.name.startswith("ontos_"))

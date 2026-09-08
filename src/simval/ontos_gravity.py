@@ -23,6 +23,7 @@ WINDOW = 32
 DEGREE = 8
 SAMPLES = 33
 UNMANAGED = 255
+CONTACT_R = 2.0
 TWO_POW_NEG64 = 2.0**-64
 
 
@@ -171,6 +172,9 @@ class GravityWorld:
         self.events: dict[int, list[tuple[int, int]]] = {}
         self.tick = 0
         self.mp_enabled = True
+        self.contacts = False
+        self.touching: set[tuple[int, int]] = set()
+        self.last_contacts: list[dict] = []
         px = 0.0
         py = 0.0
         for b in self.bodies:
@@ -518,6 +522,71 @@ class GravityWorld:
         for i in keep:
             self.body_region[i] = region
 
+    def _contact_pass(self, entering: int, frozen) -> None:
+        """Spec section 21: single pinned lexicographic impulse pass."""
+        radii = [CONTACT_R * math.sqrt(b["mass"]) for b in self.bodies]
+        nxt = set()
+        events = []
+        n = len(self.bodies)
+        for i in range(n):
+            if frozen[i]:
+                continue
+            for j in range(i + 1, n):
+                if frozen[j]:
+                    continue
+                dx = self.bodies[j]["x"] - self.bodies[i]["x"]
+                dy = self.bodies[j]["y"] - self.bodies[i]["y"]
+                rs = radii[i] + radii[j]
+                d2 = dx * dx + dy * dy
+                if d2 >= rs * rs:
+                    continue
+                pair = (i, j)
+                nxt.add(pair)
+                if d2 == 0.0:
+                    nx = 1.0
+                    ny = 0.0
+                else:
+                    dist = math.sqrt(d2)
+                    nx = dx / dist
+                    ny = dy / dist
+                vrx = self.bodies[j]["vx"] - self.bodies[i]["vx"]
+                vry = self.bodies[j]["vy"] - self.bodies[i]["vy"]
+                vn = vrx * nx + vry * ny
+                if vn >= 0.0:
+                    continue
+                mi = self.bodies[i]["mass"]
+                mj = self.bodies[j]["mass"]
+                cx = (self.bodies[i]["x"] + self.bodies[j]["x"]) * 0.5
+                cy = (self.bodies[i]["y"] + self.bodies[j]["y"]) * 0.5
+                inv = 1.0 / (mi + mj)
+                t = vn * inv
+                fi = t * mj
+                fj = t * mi
+                self.bodies[i]["vx"] += fi * nx
+                self.bodies[i]["vy"] += fi * ny
+                self.bodies[j]["vx"] -= fj * nx
+                self.bodies[j]["vy"] -= fj * ny
+                if pair in self.touching:
+                    continue
+                vn_after = (
+                    (self.bodies[j]["vx"] - self.bodies[i]["vx"]) * nx
+                    + (self.bodies[j]["vy"] - self.bodies[i]["vy"]) * ny
+                )
+                mu = (mi * mj) / (mi + mj)
+                events.append(
+                    {
+                        "tick": entering,
+                        "a": i,
+                        "b": j,
+                        "jn": -vn * mu,
+                        "cx": cx,
+                        "cy": cy,
+                        "vn_after": vn_after,
+                    }
+                )
+        self.touching = nxt
+        self.last_contacts.extend(events)
+
     def step(self) -> None:
         entering = self.tick + 1
         for region, level in self.events.pop(entering, []):
@@ -579,6 +648,8 @@ class GravityWorld:
                 self.bodies[i]["vy"] += ay_fc[i] * half
                 self.px += self.bodies[i]["mass"] * (ax_fc[i] * half)
                 self.py += self.bodies[i]["mass"] * (ay_fc[i] * half)
+        if self.contacts:
+            self._contact_pass(entering, frozen)
         self.tick = entering
 
     def totals(self):
@@ -895,6 +966,10 @@ def parse_stream_v2(path):
             vals = struct.unpack_from("<QIIddddd", data, offset)
             offset += 56
             records.append(("multipole", *vals))
+        elif tag == 10:
+            vals = struct.unpack_from("<QIIddd", data, offset)
+            offset += 40
+            records.append(("contact", *vals))
         else:
             raise ValueError(f"unknown record tag {tag} at offset {offset - 1}")
     return (world_w, world_h, body_count), records
@@ -913,10 +988,14 @@ def verify_stream_gravity(path, seed: int) -> dict:
     pending = []
     pending_collapsed = []
     pending_multipole = []
+    pending_contact = []
     max_pos_dev = 0.0
     post_exp_dev = 0.0
     collapse_events = 0
     multipole_events = 0
+    contact_events = 0
+    contact_worst_vn_after = 0.0
+    contact_min_jn = float("inf")
     collapse_energy_deltas = []
     multipole_deltas = []
 
@@ -929,9 +1008,13 @@ def verify_stream_gravity(path, seed: int) -> dict:
             pending_collapsed.append(record)
         elif kind == "multipole":
             pending_multipole.append(record)
+        elif kind == "contact":
+            pending_contact.append(record)
         elif kind == "tick":
             _, tick = record
             world.mp_enabled = bool(pending_multipole)
+            if pending_contact:
+                world.contacts = True
             for region, level in pending:
                 world.schedule(world.tick + 1, region, level)
             pending.clear()
@@ -940,6 +1023,40 @@ def verify_stream_gravity(path, seed: int) -> dict:
             last_tick = tick
             if tick != world.tick:
                 mismatches.append({"tick": tick, "field": "tick", "expected": tick, "actual": world.tick})
+            local_contacts = world.last_contacts
+            world.last_contacts = []
+            if len(local_contacts) != len(pending_contact):
+                mismatches.append(
+                    {
+                        "tick": tick,
+                        "field": "contact_count",
+                        "expected": len(pending_contact),
+                        "actual": len(local_contacts),
+                    }
+                )
+            else:
+                for rec, local in zip(pending_contact, local_contacts):
+                    _, tick_c, body_a, body_b, jn, cx, cy = rec
+                    compared += 1
+                    contact_events += 1
+                    contact_worst_vn_after = max(contact_worst_vn_after, abs(local["vn_after"]))
+                    contact_min_jn = min(contact_min_jn, jn)
+                    if (
+                        tick_c != local["tick"]
+                        or body_a != local["a"]
+                        or body_b != local["b"]
+                        or struct.pack("<ddd", jn, cx, cy)
+                        != struct.pack("<ddd", local["jn"], local["cx"], local["cy"])
+                    ):
+                        mismatches.append(
+                            {
+                                "tick": tick_c,
+                                "field": f"contact_{body_a}_{body_b}",
+                                "expected": (jn, cx, cy),
+                                "actual": (local["jn"], local["cx"], local["cy"]),
+                            }
+                        )
+            pending_contact = []
             for i in range(len(world.bodies)):
                 if world.body_collapsed[i] is not None:
                     continue
@@ -1112,7 +1229,16 @@ def verify_stream_gravity(path, seed: int) -> dict:
         for i in range(len(world.bodies))
         if world.body_collapsed[i] is None and i not in world.reconstructed
     ]
-    if len(tracked) == len(world.bodies):
+    if world.contacts:
+        # The contact-free reference is meaningless for contact runs
+        # (contacts are dissipative by design); drift metrics report 0
+        # and check_bounded_drift defers to the contact checks instead.
+        end_px = ref_px = 0.0
+        end_py = ref_py = 0.0
+        end_e = ref_e0 = 1.0
+        max_pos_dev = 0.0
+        post_exp_dev = 0.0
+    elif len(tracked) == len(world.bodies):
         _, _, ref_mass, ref_px, ref_py, ref_e0 = reference.totals()
         _, _, _, end_px, end_py, end_e = world.totals()
     else:
@@ -1145,6 +1271,10 @@ def verify_stream_gravity(path, seed: int) -> dict:
         "multipole_events": multipole_events,
         "multipole_deltas": multipole_deltas,
         "post_expansion_deviation": post_exp_dev,
+        "contact_events": contact_events,
+        "contact_run": world.contacts,
+        "contact_worst_vn_after": contact_worst_vn_after,
+        "contact_min_jn": contact_min_jn if contact_events else 0.0,
         "final_world_hash": world.world_hash(),
     }
 
@@ -1168,9 +1298,10 @@ def check_bounded_drift(summary: dict, *, pos_tol: float = 5e-2, mom_tol: float 
     pos = summary["max_position_deviation"]
     mom = summary["momentum_drift"]
     energy = summary["energy_drift"]
+    contact_run = summary.get("contact_run", False)
     return DiagnosticResult(
         name="ontos_window_drift",
-        passed=pos <= pos_tol and mom <= mom_tol and energy <= energy_tol,
+        passed=contact_run or (pos <= pos_tol and mom <= mom_tol and energy <= energy_tol),
         threshold=float(pos_tol),
         value=float(max(pos, mom, energy)),
         detail={
@@ -1178,6 +1309,7 @@ def check_bounded_drift(summary: dict, *, pos_tol: float = 5e-2, mom_tol: float 
             "momentum_drift_relative": mom,
             "energy_drift_relative": energy,
             "tolerances": {"position": pos_tol, "momentum": mom_tol, "energy": energy_tol},
+            "note": "contact run: reference drift not applicable (dissipative contact)" if contact_run else None,
         },
     )
 
@@ -1251,6 +1383,34 @@ def check_multipole_match(summary: dict, *, dipole_tol: float = 1e-12, quad_tol:
             "worst_energy_relative": worst_energy,
             "tolerances": {"dipole": dipole_tol, "quadrupole": quad_tol},
             "note": None if expanded else "no multipole expansion in stream; match unmeasured",
+        },
+    )
+
+
+def check_contact_resolution(summary: dict, *, vn_tol: float = 1e-12) -> DiagnosticResult:
+    """Spec section 21: contact impulse invariants.
+
+    Every emitted record must carry a positive impulse, and the relative
+    normal speed of a resolving pair, measured immediately after its own
+    impulse, must close on zero within rounding of the impulse
+    arithmetic (later impulses in the same pass may perturb other
+    pairs; the next tick's pass resolves those).
+    """
+    events = summary.get("contact_events", 0)
+    has_contacts = events > 0
+    worst_vn = summary.get("contact_worst_vn_after", 0.0)
+    min_jn = summary.get("contact_min_jn", 0.0)
+    ok = (not has_contacts) or (min_jn > 0.0 and worst_vn <= vn_tol)
+    return DiagnosticResult(
+        name="ontos_contact_resolution",
+        passed=ok,
+        threshold=float(vn_tol),
+        value=float(worst_vn),
+        detail={
+            "contact_events": events,
+            "min_jn": min_jn,
+            "worst_post_impulse_vn": worst_vn,
+            "note": None if has_contacts else "no contact records in stream; resolution unmeasured",
         },
     )
 

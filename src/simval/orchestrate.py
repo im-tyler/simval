@@ -16,10 +16,12 @@ installed and the file ends in .yaml/.yml):
       {"name": "observer_5", "mode": "gravity", "ticks": 300, "seed": 5,
        "bodies": 16, "observer": 777},
       {"name": "collapse_11", "mode": "gravity", "ticks": 200, "seed": 11,
-       "bodies": 8, "events": [["collapse-at", 30, 1, 1], ["expand-at", 120, 1, 1]]}
+       "bodies": 8, "events": [["collapse-at", 30, 1, 1], ["expand-at", 120, 1, 1]]},
+      {"name": "contact_11", "mode": "gravity", "ticks": 400, "seed": 11,
+       "bodies": 32, "contacts": true}
     ]
 
-Fields per spec:
+    Fields per spec:
       name     run label + run-dir name (default "run-<index>")
       mode     "gravity" (default) or "life"
       ticks    simulation length (default 100)
@@ -28,6 +30,7 @@ Fields per spec:
       events   gravity: ["demote-at"|"promote-at"|"collapse-at"|"expand-at", t, rx, ry]
                life:    ["demote"|"promote", rx, ry]
       observer gravity only, observer offset (enables the zoom-policy check)
+      contacts gravity only, enable contact mode (spec section 21)
 
 Runs are sequential by design (determinism first); a run that fails to
 generate or verify gets an "_error" row instead of aborting the grid.
@@ -50,7 +53,7 @@ KEY_METRICS = [
     "ticks", "mismatch_count",
     "max_position_deviation", "momentum_drift", "energy_drift",
     "post_expansion_deviation", "collapse_events", "expand_events",
-    "checks_failed", "wall_s",
+    "contact_events", "checks_failed", "wall_s",
 ]
 
 DRIFT_METRICS = [
@@ -111,7 +114,10 @@ def normalize_spec(spec: dict, index: int = 0) -> dict:
         "bodies": int(spec.get("bodies", 8)),
         "events": [],
         "observer": None,
+        "contacts": False,
     }
+    if mode == "gravity":
+        out["contacts"] = bool(spec.get("contacts", False))
     if mode == "gravity" and spec.get("observer") is not None:
         out["observer"] = int(spec["observer"])
     for event in spec.get("events", []):
@@ -142,6 +148,8 @@ def _ontos_json(spec: dict) -> dict:
         ]
         if spec["observer"] is not None:
             meta["observer"] = spec["observer"]
+        if spec["contacts"]:
+            meta["contacts"] = True
     return meta
 
 
@@ -153,6 +161,8 @@ def _cli_args(spec: dict, stream_path: Path) -> list[str]:
             args += [f"--{kind}", str(t), str(rx), str(ry)]
         if spec["observer"] is not None:
             args += ["--observer", str(spec["observer"])]
+        if spec["contacts"]:
+            args += ["--contacts"]
     else:
         for kind, rx, ry in spec["events"]:
             args += [f"--{kind}", str(rx), str(ry)]
@@ -221,6 +231,7 @@ def verify_run(run_dir) -> dict:
                 "collapse_energy_worst": worst,
                 "multipole_events": summary.get("multipole_events", 0),
                 "multipole_worst": mp_worst,
+                "contact_events": summary.get("contact_events", 0),
             }
         )
     else:

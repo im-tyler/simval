@@ -39,6 +39,7 @@ class OntosEngine(EngineAdapter):
         if _is_gravity(run):
             from simval.ontos_gravity import (
                 check_collapse_energy,
+                check_contact_resolution,
                 check_multipole_match,
                 check_reconstruction_error,
                 check_zoom_policy,
@@ -53,6 +54,8 @@ class OntosEngine(EngineAdapter):
                 extra_checks.append(check_collapse_energy(summary))
                 if summary.get("multipole_events", 0):
                     extra_checks.append(check_multipole_match(summary))
+            if summary.get("contact_run", False):
+                extra_checks.append(check_contact_resolution(summary))
             observer = meta.get("observer")
             if observer is not None:
                 _, records = parse_stream_v2(run / "ontos.stream")
@@ -62,12 +65,18 @@ class OntosEngine(EngineAdapter):
                 extra_checks.append(
                     check_zoom_policy(records, seed, int(observer), cli_events=cli_events)
                 )
+            if (run / "ontos.wav").exists():
+                from simval.ontos_audio import synthesize_stream, wav_bytes
+
+                pcm, digest = synthesize_stream(run / "ontos.stream")
+                recorded = (run / "ontos.wav").read_bytes()
+                extra_checks.append(_check_audio_match(recorded, wav_bytes(pcm), digest))
             try:
                 from simval.ontos_gravity import check_rebound_anchor
 
                 header, records = parse_stream_v2(run / "ontos.stream")
                 has_level_events = any(r[0] == "level" for r in records)
-                if not has_level_events:
+                if not has_level_events and not summary.get("contact_run", False):
                     extra_checks.append(
                         check_rebound_anchor(records, seed, header[2], ticks=summary["ticks_verified"])
                     )
@@ -93,6 +102,23 @@ class OntosEngine(EngineAdapter):
                 "ticks": summary["ticks_verified"],
             }
         return ctx
+
+
+def _check_audio_match(recorded: bytes, reference: bytes, digest: int):
+    from simval.result import DiagnosticResult
+
+    ok = recorded == reference
+    return DiagnosticResult(
+        name="ontos_audio_match",
+        passed=ok,
+        threshold=0.0,
+        value=0.0 if ok else 1.0,
+        detail={
+            "audio_hash": f"{digest:016x}",
+            "recorded_bytes": len(recorded),
+            "reference_bytes": len(reference),
+        },
+    )
 
 
 register_engine(OntosEngine())

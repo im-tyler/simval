@@ -19,7 +19,7 @@ Working name; the folder may be renamed. See `PLAN.md` for the full thesis and `
 |---|---|---|---|
 | `gromacs` (format-agnostic) | molecular dynamics | GROMACS, OpenMM | conserved-energy drift, RMSD/RMSF, charge, H-bonds |
 | `nbody-rebound` | celestial mechanics | REBOUND (IAS15) | energy + angular-momentum + COM conservation |
-| `ontos` | discrete multiscale (life v1) + nbody gravity with Chebyshev ephemeris windows, zoom policy, collapse + multipole reconstruction (v2) | independent spec reimplementation | stream records vs reference, bit-exact state hashes, bounded window drift, zoom-policy conformance, collapse reconstruction error, multipole dipole/quadrupole closure, REBOUND anchor (<1e-4) |
+| `ontos` | discrete multiscale (life v1) + nbody gravity with Chebyshev ephemeris windows, zoom policy, collapse + multipole reconstruction, contact dynamics + modal audio (v2) | independent spec reimplementation | stream records vs reference, bit-exact state hashes, bounded window drift, zoom-policy conformance, collapse reconstruction error, multipole dipole/quadrupole closure, contact impulse invariants, bit-exact WAV/audio-hash resynthesis, REBOUND anchor (<1e-4) |
 | `wave-fdtd` | waves / PDE | built-in leapfrog FDTD | CFL stability + energy boundedness |
 | `fluid-lbm` | fluids / CFD | built-in D2Q9 LBM | BGK τ stability + exact mass conservation |
 | `em-fdtd` | electromagnetism | built-in 2D TMz Yee | Courant condition + EM energy boundedness |
@@ -75,6 +75,7 @@ simval case-info <name>                          # reference case provenance
 simval freesolv <compound-id> [<computed-dG>]    # FreeSolv experimental ΔG lookup/validation
 simval-web --port 8765                           # local dashboard (3D rendering, charts)
 python -m simval.ontos <stream> <seed>           # verify an ontos record stream (stdlib-only)
+python -m simval.ontos_audio <stream> [--wav F] # resynthesize spec-22 modal audio (bit-exact)
 simval orchestrate --grid <file> [--ontos-bin P] # generate + verify an ontos run grid, MAD outliers
 ```
 
