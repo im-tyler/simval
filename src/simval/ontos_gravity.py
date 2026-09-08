@@ -63,6 +63,62 @@ def initial_conditions(seed: int, count: int) -> list:
     return bodies
 
 
+def test_initial_conditions(profile: str, seed: int, count: int) -> list:
+    """Test-only corpus initial conditions (mirror of ontos
+    corpus_initial_conditions; see ontos docs/DESIGN.md corpus
+    coverage). wallshot: body i targets wall i % 4, starting near it and
+    inbound at 2..5. coarsehit (count 8): bodies 0..3 are interceptors
+    outside the region-3 box aimed at a slow target cluster (bodies
+    4..7) over shared y lanes; the fine body must carry the smaller id
+    because the section 21/24 sweep is lexicographic with the fine
+    body as the outer index. Same five SplitMix64 draws per body as
+    initial_conditions, so masses match the spec ICs of the same seed.
+    """
+    rng = SplitMix64(seed)
+    bodies = []
+    for i in range(count):
+        u0 = rng.next()
+        u1 = rng.next()
+        u2 = rng.next()
+        u3 = rng.next()
+        u4 = rng.next()
+        mass = 0.5 + u0 * TWO_POW_NEG64 * 2.0
+        along = 16.0 + u1 * TWO_POW_NEG64 * 96.0
+        off = u2 * TWO_POW_NEG64 * 2.0
+        speed = 2.0 + u3 * TWO_POW_NEG64 * 3.0
+        drift = (u4 * TWO_POW_NEG64 - 0.5) * 0.5
+        if profile == "wallshot":
+            w = i % 4
+            if w == 0:
+                x, y, vx, vy = 2.0 + off, along, 0.0 - speed, drift
+            elif w == 1:
+                x, y, vx, vy = 124.0 + off, along, speed, drift
+            elif w == 2:
+                x, y, vx, vy = along, 2.0 + off, drift, 0.0 - speed
+            else:
+                x, y, vx, vy = along, 124.0 + off, drift, speed
+        elif profile == "coarsehit":
+            lane = 77.0 + 8.0 * (i % 4) + u2 * TWO_POW_NEG64 * 2.0
+            if i < 4:
+                x, y, vx, vy = (
+                    56.0 + u1 * TWO_POW_NEG64 * 4.0,
+                    lane,
+                    56.0 + u3 * TWO_POW_NEG64 * 16.0,
+                    (u4 * TWO_POW_NEG64 - 0.5) * 0.5,
+                )
+            else:
+                x, y, vx, vy = (
+                    84.0 + u1 * TWO_POW_NEG64 * 4.0,
+                    lane,
+                    (u3 * TWO_POW_NEG64 - 0.5) * 0.5,
+                    (u4 * TWO_POW_NEG64 - 0.5) * 0.5,
+                )
+        else:
+            raise ValueError(f"unknown corpus profile {profile}")
+        bodies.append({"id": i, "mass": mass, "x": x, "y": y, "vx": vx, "vy": vy})
+    return bodies
+
+
 def region_at(x: float, y: float) -> int:
     if x < 0.0 or x >= 128.0 or y < 0.0 or y >= 128.0:
         return UNMANAGED
@@ -159,9 +215,12 @@ def subset_energy(bodies) -> float:
 
 
 class GravityWorld:
-    def __init__(self, seed: int, count: int) -> None:
+    def __init__(self, seed: int, count: int, profile: str | None = None) -> None:
         self.seed = seed
-        self.bodies = initial_conditions(seed, count)
+        if profile is None:
+            self.bodies = initial_conditions(seed, count)
+        else:
+            self.bodies = test_initial_conditions(profile, seed, count)
         self.coarse = [None] * count
         self.body_region = [UNMANAGED] * count
         self.region_coarse = [False] * 4
@@ -736,13 +795,21 @@ class GravityWorld:
                         self.bodies[j]["vy"] -= ftj * nx
                 else:
                     _, jn = self._static_impulse(i, nx, ny, vrx, vry)
-                    mu = mi
+                    mu = (mi * mj) / (mi + mj)
                 if pair in self.touching:
                     continue
-                vn_after = (
-                    (self.bodies[j]["vx"] - self.bodies[i]["vx"]) * nx
-                    + (self.bodies[j]["vy"] - self.bodies[i]["vy"]) * ny
-                )
+                # The contactant is measured at its post-impulse state for
+                # fine pairs and at its (frozen) polynomial evaluation for
+                # coarse pairs — never at the stale demote-time slot.
+                if coarse_j:
+                    vn_after = (sj["vx"] - self.bodies[i]["vx"]) * nx + (
+                        sj["vy"] - self.bodies[i]["vy"]
+                    ) * ny
+                else:
+                    vn_after = (
+                        (self.bodies[j]["vx"] - self.bodies[i]["vx"]) * nx
+                        + (self.bodies[j]["vy"] - self.bodies[i]["vy"]) * ny
+                    )
                 events.append(
                     {
                         "tick": entering,
@@ -754,6 +821,7 @@ class GravityWorld:
                         "vn": vn,
                         "vn_after": vn_after,
                         "mu": mu,
+                        "static_pair": coarse_j,
                     }
                 )
         if extended:
@@ -1264,12 +1332,12 @@ def parse_stream_v2(path):
     return (world_w, world_h, body_count), records
 
 
-def verify_stream_gravity(path, seed: int) -> dict:
+def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
     (world_w, world_h, body_count), records = parse_stream_v2(path)
     if world_w != 128 or world_h != 128:
         raise ValueError(f"unsupported world size {world_w}x{world_h}")
-    world = GravityWorld(seed, body_count)
-    reference = GravityWorld(seed, body_count)
+    world = GravityWorld(seed, body_count, profile)
+    reference = GravityWorld(seed, body_count, profile)
 
     mismatches = []
     compared = 0
@@ -1289,6 +1357,7 @@ def verify_stream_gravity(path, seed: int) -> dict:
     contact_worst_vn_after = 0.0
     contact_min_jn = float("inf")
     static_contact_events = 0
+    coarse_static_contact_events = 0
     collapse_energy_deltas = []
     multipole_deltas = []
     radial_deltas = []
@@ -1366,6 +1435,8 @@ def verify_stream_gravity(path, seed: int) -> dict:
                     contact_min_jn = min(contact_min_jn, jn)
                     if body_b >= MONOPOLE_BASE:
                         static_contact_events += 1
+                    if local.get("static_pair"):
+                        coarse_static_contact_events += 1
                     if (
                         tick_c != local["tick"]
                         or body_a != local["a"]
@@ -1649,6 +1720,7 @@ def verify_stream_gravity(path, seed: int) -> dict:
         "contact_worst_vn_after": contact_worst_vn_after,
         "contact_min_jn": contact_min_jn if contact_events else 0.0,
         "static_contact_events": static_contact_events,
+        "coarse_static_contact_events": coarse_static_contact_events,
         "final_world_hash": world.world_hash(),
     }
 
@@ -1860,11 +1932,17 @@ def _main(argv=None) -> int:
     )
     parser.add_argument("stream", help="path to a .stream file")
     parser.add_argument("seed", type=int, help="world seed the stream was produced with")
+    parser.add_argument(
+        "--test-ic",
+        choices=["wallshot", "coarsehit"],
+        help="test-only corpus initial conditions the stream was produced with "
+        "(ontos --test-ic; see ontos docs/DESIGN.md corpus coverage)",
+    )
     args = parser.parse_args(argv)
     try:
         data = Path(args.stream).read_bytes()
         if len(data) >= 8 and data[4:8] == struct.pack("<I", 2):
-            summary = verify_stream_gravity(args.stream, args.seed)
+            summary = verify_stream_gravity(args.stream, args.seed, args.test_ic)
             ok = summary["mismatch_count"] == 0
             print(
                 f"ontos gravity stream: {'OK' if ok else 'MISMATCH'} | ticks={summary['ticks_verified']} "

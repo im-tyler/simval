@@ -177,7 +177,9 @@ def test_rebound_anchor_agrees():
 # --- Section 19: collapse and reconstruction ---
 
 
-def _emit_gravity_stream(path, seed, count, schedule, ticks, contacts=False, radial=False, params=None):
+def _emit_gravity_stream(
+    path, seed, count, schedule, ticks, contacts=False, radial=False, params=None, profile=None
+):
     """Serialize a reference gravity run per the spec section 16 emission contract.
 
     schedule: list of (tick, region_index, level) with level 0 demote,
@@ -189,8 +191,10 @@ def _emit_gravity_stream(path, seed, count, schedule, ticks, contacts=False, rad
     radial: spec section 23 mode — collapses emit RegionRadial (tag 11).
     params: optional (restitution, friction, walls) tuple — emits
     ContactParams (tag 12) before the first TickHeader.
+    profile: optional test-only corpus initial conditions (wallshot /
+    coarsehit; mirror of ontos corpus_initial_conditions).
     """
-    world = GravityWorld(seed, count)
+    world = GravityWorld(seed, count, profile)
     world.contacts = contacts
     world.radial_enabled = radial
     if params is not None:
@@ -1041,3 +1045,90 @@ def test_engine_diagnose_walls_run(tmp_path):
     assert "ontos_contact_resolution" in names
     assert "ontos_audio_match" in names
     assert all(r.passed for r in results if r.name.startswith("ontos_"))
+
+
+# --- Section 24 corpus coverage: wall-hit + fine x coarse static contacts ---
+
+
+def test_wallshot_emitter_reproduces_recorded_stream(tmp_path):
+    out = tmp_path / "wallshot.stream"
+    _emit_gravity_stream(
+        out, 3, 16, [], 800, contacts=True, params=(0.7, 0.3, 1), profile="wallshot"
+    )
+    assert out.read_bytes() == (CONTACT_EXAMPLES / "wallshot" / "ontos.stream").read_bytes()
+
+
+def test_coarsehit_emitter_reproduces_recorded_stream(tmp_path):
+    out = tmp_path / "coarsehit.stream"
+    _emit_gravity_stream(
+        out, 11, 8, [(1, 3, 0)], 500, contacts=True, params=(0.5, 0.25, 0), profile="coarsehit"
+    )
+    assert out.read_bytes() == (CONTACT_EXAMPLES / "coarsehit" / "ontos.stream").read_bytes()
+
+
+def test_wallshot_stream_hits_every_wall():
+    from simval.ontos_gravity import parse_stream_v2
+
+    summary = verify_stream_gravity(
+        CONTACT_EXAMPLES / "wallshot" / "ontos.stream", 3, "wallshot"
+    )
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["contact_events"] == 16
+    assert summary["static_contact_events"] == 16
+    assert summary["contact_run"] is True
+    assert check_contact_resolution(summary).passed
+    assert summary["contact_worst_vn_after"] < 1e-12
+    assert summary["contact_min_jn"] > 0.0
+    _, records = parse_stream_v2(CONTACT_EXAMPLES / "wallshot" / "ontos.stream")
+    walls = {}
+    for record in records:
+        if record[0] == "contact" and record[3] >= WALL_BASE:
+            walls[record[3] - WALL_BASE] = walls.get(record[3] - WALL_BASE, 0) + 1
+    assert walls == {0: 4, 1: 4, 2: 4, 3: 4}, walls
+
+
+def test_coarsehit_stream_lands_static_contacts():
+    summary = verify_stream_gravity(
+        CONTACT_EXAMPLES / "coarsehit" / "ontos.stream", 11, "coarsehit"
+    )
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["contact_events"] == 4
+    assert summary["coarse_static_contact_events"] == 4
+    assert summary["contact_run"] is True
+    assert check_contact_resolution(summary).passed
+    assert summary["contact_worst_vn_after"] < 1e-12
+    assert summary["contact_min_jn"] > 0.0
+
+
+def test_test_ic_profiles_match_spec_ic_masses():
+    from simval.ontos_gravity import initial_conditions, test_initial_conditions
+
+    spec = initial_conditions(5, 6)
+    for profile in ("wallshot", "coarsehit"):
+        corpus = test_initial_conditions(profile, 5, 6)
+        for a, b in zip(spec, corpus):
+            assert a["id"] == b["id"]
+            assert struct.pack("<d", a["mass"]) == struct.pack("<d", b["mass"])
+
+
+def test_unknown_profile_rejected():
+    from simval.ontos_gravity import test_initial_conditions
+
+    with pytest.raises(ValueError, match="unknown corpus profile"):
+        test_initial_conditions("nonsense", 1, 4)
+
+
+def test_engine_diagnose_corpus_runs(tmp_path):
+    import shutil
+
+    for name in ("wallshot", "coarsehit"):
+        run = tmp_path / f"ontos_run_{name}"
+        shutil.copytree(CONTACT_EXAMPLES / name, run)
+        engine = select_engine(run)
+        assert engine.name == "ontos"
+        ctx = engine.load_context(run, selection="default")
+        results = run_checks(ctx)
+        names = {r.name for r in results}
+        assert "ontos_contact_resolution" in names
+        assert "ontos_audio_match" in names
+        assert all(r.passed for r in results if r.name.startswith("ontos_")), name

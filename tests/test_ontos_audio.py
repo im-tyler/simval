@@ -109,6 +109,24 @@ def test_restitution_example_wav_matches():
     assert digest == 0xC4317E51BCE80E83
 
 
+def test_wallshot_example_wav_matches():
+    # Wall-hit corpus (test-only wallshot ICs): 16 wall contacts, mu = m_a
+    # per the section 24 pseudo-id rule.
+    pcm, digest = synthesize_stream(CONTACT_EXAMPLES / "wallshot" / "ontos.stream")
+    recorded = (CONTACT_EXAMPLES / "wallshot" / "ontos.wav").read_bytes()
+    assert wav_bytes(pcm) == recorded
+    assert digest == 0x8B5D1286CFA35900
+
+
+def test_coarsehit_example_wav_matches():
+    # Fine x ephemeris-coarse static-contact corpus (test-only coarsehit
+    # ICs): real-id static pairs use the section 22 reduced mass.
+    pcm, digest = synthesize_stream(CONTACT_EXAMPLES / "coarsehit" / "ontos.stream")
+    recorded = (CONTACT_EXAMPLES / "coarsehit" / "ontos.wav").read_bytes()
+    assert wav_bytes(pcm) == recorded
+    assert digest == 0x11EADC8A83DF194E
+
+
 def test_monopole_mu_uses_collapse_mass():
     from simval.ontos_gravity import MONOPOLE_BASE, parse_stream_v2
 

@@ -48,7 +48,7 @@ class OntosEngine(EngineAdapter):
                 verify_stream_gravity,
             )
 
-            summary = verify_stream_gravity(run / "ontos.stream", seed)
+            summary = verify_stream_gravity(run / "ontos.stream", seed, meta.get("test_ic"))
             extra_checks = []
             if summary.get("collapse_events", 0) or summary.get("expand_events", 0):
                 extra_checks.append(check_reconstruction_error(summary))
