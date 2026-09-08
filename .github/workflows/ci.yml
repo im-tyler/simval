@@ -65,7 +65,7 @@ jobs:
       - name: Cross-check modal audio (spec section 22)
         run: |
           set -e
-          LINE=$($ontos --mode gravity --contacts --ticks 400 --seed 11 --bodies 32 --out /tmp/contact.stream --wav /tmp/contact.wav)
+          LINE=$(ontos/target/release/ontos --mode gravity --contacts --ticks 400 --seed 11 --bodies 32 --out /tmp/contact.stream --wav /tmp/contact.wav)
           echo "$LINE"
           HASH=$(echo "$LINE" | grep -o 'audio=[0-9a-f]*' | cut -d= -f2)
           PYTHONPATH=src python3 -m simval.ontos_audio /tmp/contact.stream --wav /tmp/ref.wav --expect "$HASH"
