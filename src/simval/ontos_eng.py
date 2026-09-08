@@ -39,6 +39,7 @@ class OntosEngine(EngineAdapter):
         if _is_gravity(run):
             from simval.ontos_gravity import (
                 check_collapse_energy,
+                check_multipole_match,
                 check_reconstruction_error,
                 check_zoom_policy,
                 parse_stream_v2,
@@ -50,6 +51,8 @@ class OntosEngine(EngineAdapter):
             if summary.get("collapse_events", 0) or summary.get("expand_events", 0):
                 extra_checks.append(check_reconstruction_error(summary))
                 extra_checks.append(check_collapse_energy(summary))
+                if summary.get("multipole_events", 0):
+                    extra_checks.append(check_multipole_match(summary))
             observer = meta.get("observer")
             if observer is not None:
                 _, records = parse_stream_v2(run / "ontos.stream")

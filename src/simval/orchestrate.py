@@ -55,7 +55,7 @@ KEY_METRICS = [
 
 DRIFT_METRICS = [
     "max_position_deviation", "momentum_drift", "energy_drift",
-    "post_expansion_deviation", "collapse_energy_worst",
+    "post_expansion_deviation", "collapse_energy_worst", "multipole_worst",
 ]
 
 
@@ -207,6 +207,9 @@ def verify_run(run_dir) -> dict:
         worst = 0.0
         for _, _, rec_e, syn_e in summary.get("collapse_energy_deltas", []):
             worst = max(worst, abs(syn_e - rec_e) / max(abs(rec_e), 1.0))
+        mp_worst = 0.0
+        for _, _, dipole, quad, _energy in summary.get("multipole_deltas", []):
+            mp_worst = max(mp_worst, dipole, quad)
         row.update(
             {
                 "max_position_deviation": summary["max_position_deviation"],
@@ -216,6 +219,8 @@ def verify_run(run_dir) -> dict:
                 "collapse_events": summary["collapse_events"],
                 "expand_events": summary["expand_events"],
                 "collapse_energy_worst": worst,
+                "multipole_events": summary.get("multipole_events", 0),
+                "multipole_worst": mp_worst,
             }
         )
     else:

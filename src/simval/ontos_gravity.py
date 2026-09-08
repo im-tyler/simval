@@ -170,6 +170,7 @@ class GravityWorld:
         self.expand_count = 0
         self.events: dict[int, list[tuple[int, int]]] = {}
         self.tick = 0
+        self.mp_enabled = True
         px = 0.0
         py = 0.0
         for b in self.bodies:
@@ -317,11 +318,26 @@ class GravityWorld:
             com_y = my / mass
             vcom_x = px / mass
             vcom_y = py / mass
+            qxx = 0.0
+            qxy = 0.0
+            qyy = 0.0
+            for i in members:
+                b = self.bodies[i]
+                dx = b["x"] - com_x
+                dy = b["y"] - com_y
+                qxx += b["mass"] * dx * dx
+                qxy += b["mass"] * dx * dy
+                qyy += b["mass"] * dy * dy
         else:
             com_x = 0.0
             com_y = 0.0
             vcom_x = 0.0
             vcom_y = 0.0
+            mx = 0.0
+            my = 0.0
+            qxx = 0.0
+            qxy = 0.0
+            qyy = 0.0
         rng = SplitMix64(self.seed ^ ((region * 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF))
         jitter = {}
         for i in members:
@@ -360,6 +376,12 @@ class GravityWorld:
             "members": members,
             "jitter": jitter,
             "spread": spread,
+            "multipole": self.mp_enabled,
+            "mx": mx,
+            "my": my,
+            "qxx": qxx,
+            "qxy": qxy,
+            "qyy": qyy,
         }
         self.region_collapsed[region] = rec
         self.last_collapses.append(rec)
@@ -371,40 +393,84 @@ class GravityWorld:
         rec = self.region_collapsed[region]
         members = rec["members"]
         states = []
+        transformed = False
         if members:
+            if rec["multipole"]:
+                base = {i: rec["jitter"][i] for i in members}
+                if len(members) >= 3:
+                    swx = 0.0
+                    swy = 0.0
+                    for i in members:
+                        swx += self.bodies[i]["mass"] * base[i][0]
+                        swy += self.bodies[i]["mass"] * base[i][1]
+                    wx = swx / rec["mass"]
+                    wy = swy / rec["mass"]
+                    dhat = {}
+                    jxx = 0.0
+                    jxy = 0.0
+                    jyy = 0.0
+                    for i in members:
+                        m = self.bodies[i]["mass"]
+                        dx = base[i][0] - wx
+                        dy = base[i][1] - wy
+                        jxx += m * dx * dx
+                        jxy += m * dx * dy
+                        jyy += m * dy * dy
+                        dhat[i] = (dx, dy)
+                    if jxx > 0.0 and rec["qxx"] > 0.0:
+                        lj00 = math.sqrt(jxx)
+                        lj10 = jxy / lj00
+                        jjd = jyy - lj10 * lj10
+                        if jjd > 0.0:
+                            lq00 = math.sqrt(rec["qxx"])
+                            lq10 = rec["qxy"] / lq00
+                            qqd = rec["qyy"] - lq10 * lq10
+                            if qqd > 0.0:
+                                lj11 = math.sqrt(jjd)
+                                lq11 = math.sqrt(qqd)
+                                u00 = 1.0 / lj00
+                                u11 = 1.0 / lj11
+                                u10 = -(lj10 / (lj00 * lj11))
+                                a00 = lq00 * u00
+                                a11 = lq11 * u11
+                                a10 = lq10 * u00 + lq11 * u10
+                                for i in members:
+                                    dx, dy = dhat[i]
+                                    base[i] = (a00 * dx, a10 * dx + a11 * dy)
+                                transformed = True
+                sum_mx = 0.0
+                sum_my = 0.0
+                for i in members[:-1]:
+                    self.bodies[i]["x"] = rec["com_x"] + base[i][0]
+                    self.bodies[i]["y"] = rec["com_y"] + base[i][1]
+                    sum_mx += self.bodies[i]["mass"] * self.bodies[i]["x"]
+                    sum_my += self.bodies[i]["mass"] * self.bodies[i]["y"]
+                last = members[-1]
+                m_last = self.bodies[last]["mass"]
+                self.bodies[last]["x"] = (rec["mx"] - sum_mx) / m_last
+                self.bodies[last]["y"] = (rec["my"] - sum_my) / m_last
+            else:
+                for i in members:
+                    jx, jy = rec["jitter"][i]
+                    self.bodies[i]["x"] = rec["com_x"] + jx
+                    self.bodies[i]["y"] = rec["com_y"] + jy
             sum_mvx = 0.0
             sum_mvy = 0.0
             for i in members[:-1]:
-                jx, jy = rec["jitter"][i]
                 sx, sy = rec["spread"][i]
-                b = {
-                    "id": i,
-                    "mass": self.bodies[i]["mass"],
-                    "x": rec["com_x"] + jx,
-                    "y": rec["com_y"] + jy,
-                    "vx": rec["vcom_x"] + sx,
-                    "vy": rec["vcom_y"] + sy,
-                }
-                states.append(b)
-                sum_mvx += b["mass"] * b["vx"]
-                sum_mvy += b["mass"] * b["vy"]
+                self.bodies[i]["vx"] = rec["vcom_x"] + sx
+                self.bodies[i]["vy"] = rec["vcom_y"] + sy
+                sum_mvx += self.bodies[i]["mass"] * self.bodies[i]["vx"]
+                sum_mvy += self.bodies[i]["mass"] * self.bodies[i]["vy"]
             last = members[-1]
             m_last = self.bodies[last]["mass"]
-            states.append(
-                {
-                    "id": last,
-                    "mass": m_last,
-                    "x": rec["com_x"] + rec["jitter"][last][0],
-                    "y": rec["com_y"] + rec["jitter"][last][1],
-                    "vx": (rec["px"] - sum_mvx) / m_last,
-                    "vy": (rec["py"] - sum_mvy) / m_last,
-                }
-            )
-            for b in states:
-                self.bodies[b["id"]] = b
-                self.body_collapsed[b["id"]] = None
-                self.body_region[b["id"]] = UNMANAGED
-                self.reconstructed.add(b["id"])
+            self.bodies[last]["vx"] = (rec["px"] - sum_mvx) / m_last
+            self.bodies[last]["vy"] = (rec["py"] - sum_mvy) / m_last
+            for i in members:
+                self.body_collapsed[i] = None
+                self.body_region[i] = UNMANAGED
+                self.reconstructed.add(i)
+            states = [dict(self.bodies[i]) for i in members]
         self.region_collapsed[region] = None
         self.expand_count += 1
         self.last_expansion = {
@@ -413,6 +479,16 @@ class GravityWorld:
             "target_px": rec["px"],
             "target_py": rec["py"],
             "bodies": [dict(b) for b in states],
+            "multipole": bool(rec["multipole"]),
+            "transformed": transformed,
+            "target_com_x": rec["com_x"],
+            "target_com_y": rec["com_y"],
+            "target_mx": rec["mx"],
+            "target_my": rec["my"],
+            "target_qxx": rec["qxx"],
+            "target_qxy": rec["qxy"],
+            "target_qyy": rec["qyy"],
+            "target_energy": rec["energy"],
         }
 
     def _refit(self, region: int, t: int) -> None:
@@ -815,6 +891,10 @@ def parse_stream_v2(path):
             vals = struct.unpack_from("<QIIQdddddd", data, offset)
             offset += 72
             records.append(("collapsed", *vals))
+        elif tag == 9:
+            vals = struct.unpack_from("<QIIddddd", data, offset)
+            offset += 56
+            records.append(("multipole", *vals))
         else:
             raise ValueError(f"unknown record tag {tag} at offset {offset - 1}")
     return (world_w, world_h, body_count), records
@@ -832,10 +912,13 @@ def verify_stream_gravity(path, seed: int) -> dict:
     last_tick = 0
     pending = []
     pending_collapsed = []
+    pending_multipole = []
     max_pos_dev = 0.0
     post_exp_dev = 0.0
     collapse_events = 0
+    multipole_events = 0
     collapse_energy_deltas = []
+    multipole_deltas = []
 
     for record in records:
         kind = record[0]
@@ -844,8 +927,11 @@ def verify_stream_gravity(path, seed: int) -> dict:
             pending.append((ry * 2 + rx, level))
         elif kind == "collapsed":
             pending_collapsed.append(record)
+        elif kind == "multipole":
+            pending_multipole.append(record)
         elif kind == "tick":
             _, tick = record
+            world.mp_enabled = bool(pending_multipole)
             for region, level in pending:
                 world.schedule(world.tick + 1, region, level)
             pending.clear()
@@ -896,7 +982,34 @@ def verify_stream_gravity(path, seed: int) -> dict:
                     if struct.pack("<d", got) != struct.pack("<d", want):
                         mismatches.append({"tick": tick_c, "field": name, "expected": got, "actual": want})
                 collapse_energy_deltas.append((tick_c, region, energy, local["syn_energy"]))
+                mrec = next(
+                    (m for m in pending_multipole if m[1] == tick_c and (m[3] * 2 + m[2]) == region),
+                    None,
+                )
+                if mrec is not None:
+                    pending_multipole.remove(mrec)
+                    compared += 1
+                    multipole_events += 1
+                    for name, got, want in (
+                        ("multipole_mx", mrec[4], local["mx"]),
+                        ("multipole_my", mrec[5], local["my"]),
+                        ("multipole_qxx", mrec[6], local["qxx"]),
+                        ("multipole_qxy", mrec[7], local["qxy"]),
+                        ("multipole_qyy", mrec[8], local["qyy"]),
+                    ):
+                        if struct.pack("<d", got) != struct.pack("<d", want):
+                            mismatches.append({"tick": tick_c, "field": name, "expected": got, "actual": want})
             pending_collapsed.clear()
+            for mrec in pending_multipole:
+                mismatches.append(
+                    {
+                        "tick": tick,
+                        "field": "multipole_record",
+                        "expected": None,
+                        "actual": f"RegionMultipole without RegionCollapsed for region {mrec[3] * 2 + mrec[2]}",
+                    }
+                )
+            pending_multipole.clear()
             for local in world.last_collapses:
                 mismatches.append(
                     {
@@ -907,6 +1020,42 @@ def verify_stream_gravity(path, seed: int) -> dict:
                     }
                 )
             world.last_collapses.clear()
+            if world.last_expansion is not None:
+                exp = world.last_expansion
+                world.last_expansion = None
+                if exp["multipole"] and exp["bodies"]:
+                    bodies = exp["bodies"]
+                    sx = 0.0
+                    sy = 0.0
+                    for b in bodies:
+                        sx += b["mass"] * b["x"]
+                        sy += b["mass"] * b["y"]
+                    scale = max(abs(exp["target_mx"]), abs(exp["target_my"]), 1e-30)
+                    dipole = max(abs(sx - exp["target_mx"]), abs(sy - exp["target_my"])) / scale
+                    qxx = 0.0
+                    qxy = 0.0
+                    qyy = 0.0
+                    for b in bodies:
+                        dx = b["x"] - exp["target_com_x"]
+                        dy = b["y"] - exp["target_com_y"]
+                        qxx += b["mass"] * dx * dx
+                        qxy += b["mass"] * dx * dy
+                        qyy += b["mass"] * dy * dy
+                    q_scale = max(abs(exp["target_qxx"]), abs(exp["target_qyy"]), 1e-30)
+                    quad = (
+                        max(
+                            abs(qxx - exp["target_qxx"]),
+                            abs(qxy - exp["target_qxy"]),
+                            abs(qyy - exp["target_qyy"]),
+                        )
+                        / q_scale
+                    )
+                    if not exp.get("transformed"):
+                        quad = 0.0
+                    energy_delta = abs(subset_energy(exp["bodies"]) - exp["target_energy"]) / max(
+                        abs(exp["target_energy"]), 1.0
+                    )
+                    multipole_deltas.append((exp["tick"], exp["region"], dipole, quad, energy_delta))
         elif kind == "snapshot":
             compared += 1
         elif kind == "totals":
@@ -993,6 +1142,8 @@ def verify_stream_gravity(path, seed: int) -> dict:
         "collapse_events": collapse_events,
         "expand_events": world.expand_count,
         "collapse_energy_deltas": collapse_energy_deltas,
+        "multipole_events": multipole_events,
+        "multipole_deltas": multipole_deltas,
         "post_expansion_deviation": post_exp_dev,
         "final_world_hash": world.world_hash(),
     }
@@ -1066,6 +1217,41 @@ def check_collapse_energy(summary: dict, *, tol: float = 8.0) -> DiagnosticResul
         threshold=float(tol),
         value=float(worst),
         detail={"collapse_events": len(deltas), "worst_relative_delta": worst},
+    )
+
+
+def check_multipole_match(summary: dict, *, dipole_tol: float = 1e-12, quad_tol: float = 1e-9) -> DiagnosticResult:
+    """Spec section 20: post-expansion dipole closure and quadrupole match.
+
+    The synthesized set's mass-weighted position sum must close on the
+    collapse record's (mx, my) to rounding, and its second central moments
+    on (qxx, qxy, qyy) to rounding of the transform arithmetic (measured
+    when the transform ran; N < 3 cycles pin the dipole only). The
+    expansion-set energy delta vs the collapse record is reported as
+    detail (it is not an invariant of the synthesis).
+    """
+    deltas = summary.get("multipole_deltas", [])
+    worst_dipole = 0.0
+    worst_quad = 0.0
+    worst_energy = 0.0
+    for _, _, dipole, quad, energy_delta in deltas:
+        worst_dipole = max(worst_dipole, dipole)
+        worst_quad = max(worst_quad, quad)
+        worst_energy = max(worst_energy, energy_delta)
+    expanded = bool(deltas)
+    return DiagnosticResult(
+        name="ontos_multipole_match",
+        passed=(not expanded) or (worst_dipole <= dipole_tol and worst_quad <= quad_tol),
+        threshold=float(quad_tol),
+        value=float(max(worst_dipole, worst_quad)),
+        detail={
+            "multipole_expansions": len(deltas),
+            "worst_dipole_relative": worst_dipole,
+            "worst_quadrupole_relative": worst_quad,
+            "worst_energy_relative": worst_energy,
+            "tolerances": {"dipole": dipole_tol, "quadrupole": quad_tol},
+            "note": None if expanded else "no multipole expansion in stream; match unmeasured",
+        },
     )
 
 
