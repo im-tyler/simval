@@ -22,6 +22,7 @@ from simval.ontos_gravity import (
     check_radial_shape,
     check_reconstruction_error,
     check_reference_match_gravity,
+    check_shell_shape,
     region_at,
     verify_stream_gravity,
 )
@@ -178,17 +179,28 @@ def test_rebound_anchor_agrees():
 
 
 def _emit_gravity_stream(
-    path, seed, count, schedule, ticks, contacts=False, radial=False, params=None, profile=None
+    path,
+    seed,
+    count,
+    schedule,
+    ticks,
+    contacts=False,
+    radial=False,
+    shells=False,
+    params=None,
+    profile=None,
 ):
     """Serialize a reference gravity run per the spec section 16 emission contract.
 
     schedule: list of (tick, region_index, level) with level 0 demote,
     1 promote/expand, 2 collapse. Collapse events additionally emit the
     section 19 RegionCollapsed record (and RegionMultipole /
-    RegionRadial when the modes are on) before that tick's TickHeader.
+    RegionRadial / RegionShells when the modes are on) before that
+    tick's TickHeader.
     contacts: spec section 21 mode — emits Contact records (tag 10) in
     generation order before that tick's TickHeader.
     radial: spec section 23 mode — collapses emit RegionRadial (tag 11).
+    shells: spec section 25 mode — collapses emit RegionShells (tag 13).
     params: optional (restitution, friction, walls) tuple — emits
     ContactParams (tag 12) before the first TickHeader.
     profile: optional test-only corpus initial conditions (wallshot /
@@ -197,6 +209,7 @@ def _emit_gravity_stream(
     world = GravityWorld(seed, count, profile)
     world.contacts = contacts
     world.radial_enabled = radial
+    world.shells_enabled = shells
     if params is not None:
         world.contact_params = True
         world.restitution, world.friction, walls = params
@@ -247,6 +260,18 @@ def _emit_gravity_stream(
                         c["region"] % 2,
                         c["region"] // 2,
                         c["binding"],
+                    )
+                if c["shells"]:
+                    out += b"\x0d" + struct.pack(
+                        "<QIIddddd",
+                        c["tick"],
+                        c["region"] % 2,
+                        c["region"] // 2,
+                        c["binding"],
+                        c["shell_bindings"][0],
+                        c["shell_bindings"][1],
+                        c["shell_bindings"][2],
+                        c["shell_bindings"][3],
                     )
         world.last_collapses.clear()
         for c in world.last_contacts:
@@ -863,6 +888,186 @@ def test_engine_diagnose_radial_run(tmp_path):
     names = {r.name for r in results}
     assert "ontos_radial_shape" in names
     assert all(r.passed for r in results if r.name.startswith("ontos_"))
+
+
+# --- Section 25: per-shell radial synthesis ---
+
+
+def test_shells_roundtrip_self_consistent(tmp_path):
+    order, _ = _region_occupancy(42, 12, 5)
+    region = order[0]
+    stream = tmp_path / "shells.stream"
+    _emit_gravity_stream(stream, 42, 12, [(6, region, 2), (36, region, 1)], 80, shells=True)
+    summary = verify_stream_gravity(stream, 42)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["collapse_events"] == 1
+    assert summary["shell_events"] == 1
+    assert summary["expand_events"] == 1
+    result = check_shell_shape(summary)
+    assert result.passed, result.detail
+    assert result.detail["worst_dipole_relative"] <= 1e-12
+    assert result.detail["worst_shell_binding_relative"] <= 1e-9
+    if result.detail["vertex_cycles"] == 0:
+        assert result.detail["worst_energy_relative"] <= 1e-9
+
+
+def test_shells_recorded_stream_verifies():
+    summary = verify_stream_gravity(EXAMPLES / "shells" / "ontos.stream", 17)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["ticks_verified"] == 240
+    assert summary["shell_events"] == 3
+    assert summary["expand_events"] == 3
+    result = check_shell_shape(summary)
+    assert result.passed, result.detail
+    # Measured: per-shell binding closes at bisection precision, dipole
+    # exactly, energy at rounding for every reachable cycle.
+    assert result.detail["worst_shell_binding_relative"] < 1e-9
+    assert result.detail["worst_dipole_relative"] < 1e-12
+    assert check_reconstruction_error(summary).passed
+
+
+def test_shells_per_shell_binding_exact_across_seeds(tmp_path):
+    # The exact invariant of the mode: each solve-time shell's intra
+    # binding, measured on the final synthesized positions, closes on
+    # its record. Swept seeds keep it at rounding.
+    worst = 0.0
+    for seed in (7, 11, 13, 19, 23):
+        order, _ = _region_occupancy(seed, 16, 5)
+        stream = tmp_path / f"shells_{seed}.stream"
+        _emit_gravity_stream(
+            stream, seed, 16, [(6, order[0], 2), (40, order[0], 1)], 100, shells=True
+        )
+        summary = verify_stream_gravity(stream, seed)
+        assert summary["mismatch_count"] == 0
+        for d in summary["shell_deltas"]:
+            worst = max(worst, d[4])
+    assert worst < 1e-9
+
+
+def test_shells_modes_differ_from_radial(tmp_path):
+    order, _ = _region_occupancy(42, 12, 5)
+    region = order[0]
+    rad = tmp_path / "rad.stream"
+    shl = tmp_path / "shl.stream"
+    _emit_gravity_stream(rad, 42, 12, [(6, region, 2), (36, region, 1)], 80, radial=True)
+    _emit_gravity_stream(shl, 42, 12, [(6, region, 2), (36, region, 1)], 80, shells=True)
+    assert rad.read_bytes() != shl.read_bytes()
+
+
+def test_tampered_shells_record_fails(tmp_path):
+    order, _ = _region_occupancy(42, 12, 5)
+    stream = tmp_path / "ontos.stream"
+    _emit_gravity_stream(stream, 42, 12, [(6, order[0], 2), (36, order[0], 1)], 40, shells=True)
+    data = bytearray(stream.read_bytes())
+    sizes = {1: 9, 2: 9, 3: 17, 4: 10, 5: 34, 6: 55, 7: 57, 8: 73, 9: 57, 10: 41, 11: 25, 13: 57}
+    off = 20
+    flipped = False
+    while off < len(data):
+        tag = data[off]
+        if tag == 13 and not flipped:
+            data[off + 25] ^= 0x01  # low byte of b0
+            flipped = True
+            break
+        off += sizes[tag]
+    assert flipped
+    corrupt = tmp_path / "corrupt.stream"
+    corrupt.write_bytes(bytes(data))
+    summary = verify_stream_gravity(corrupt, 42)
+    assert summary["mismatch_count"] > 0
+    assert not check_reference_match_gravity(summary).passed
+
+
+def test_engine_diagnose_shells_run(tmp_path):
+    import shutil
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(EXAMPLES / "shells", run)
+    engine = select_engine(run)
+    assert engine.name == "ontos"
+    ctx = engine.load_context(run, selection="default")
+    results = run_checks(ctx)
+    names = {r.name for r in results}
+    assert "ontos_shell_shape" in names
+    assert all(r.passed for r in results if r.name.startswith("ontos_"))
+
+
+# --- Section 26: collapse-on-coarse composition ---
+
+
+def test_coarse_collapse_roundtrip_self_consistent(tmp_path):
+    order, _ = _region_occupancy(11, 10, 5)
+    region = order[0]
+    stream = tmp_path / "coarse.stream"
+    _emit_gravity_stream(
+        stream, 11, 10, [(10, region, 0), (30, region, 2), (120, region, 1)], 200
+    )
+    summary = verify_stream_gravity(stream, 11)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["collapse_events"] == 1
+    assert summary["expand_events"] == 1
+    assert check_bounded_drift(summary).passed
+
+
+def test_coarse_collapse_recorded_stream_verifies():
+    summary = verify_stream_gravity(EXAMPLES / "coarse_collapse" / "ontos.stream", 23)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["collapse_events"] == 1
+    assert summary["expand_events"] == 1
+    assert check_bounded_drift(summary).passed
+    assert check_reconstruction_error(summary).passed
+
+
+def test_coarse_collapse_terminates_window_for_out_of_box_bodies():
+    w = GravityWorld(11, 8)
+    w.bodies[0]["x"] = 127.995
+    w.bodies[0]["y"] = 96.0
+    w.bodies[0]["vx"] = 0.5
+    w.bodies[0]["vy"] = 0.0
+    w.schedule(1, 3, 0)
+    w.schedule(30, 3, 2)
+    for _ in range(30):
+        w.step()
+    assert w.region_collapsed[3] is not None
+    assert w.region_collapsed[3]["count"] > 0
+    assert 0 not in w.region_collapsed[3]["members"]
+    assert w.body_collapsed[0] is None
+    assert w.coarse[0] is None, "fit discarded at collapse"
+    _, region, level = w.emitted_state(0)
+    assert (region, level) == (UNMANAGED, 1)
+    for _ in range(10):
+        w.step()
+    _, region, level = w.emitted_state(0)
+    assert level == 1, "stays fine after the collapse"
+
+
+def test_coarse_collapse_absorbs_foreign_window_bodies_by_evaluation():
+    w = GravityWorld(11, 8)
+    w.bodies[0]["x"] = 63.995
+    w.bodies[0]["y"] = 32.0
+    w.bodies[0]["vx"] = 0.5
+    w.bodies[0]["vy"] = 0.0
+    w.schedule(1, 0, 0)
+    w.schedule(30, 1, 2)
+    for _ in range(30):
+        w.step()
+    rec = w.region_collapsed[1]
+    assert rec is not None and 0 in rec["members"]
+    assert w.coarse[0] is None, "old window discarded"
+    _, region, level = w.emitted_state(0)
+    assert (region, level) == (1, 2)
+
+
+def test_coarse_collapse_with_shells_verifies(tmp_path):
+    order, _ = _region_occupancy(11, 16, 5)
+    region = order[0]
+    stream = tmp_path / "coarse_shells.stream"
+    _emit_gravity_stream(
+        stream, 11, 16, [(10, region, 0), (30, region, 2), (120, region, 1)], 200, shells=True
+    )
+    summary = verify_stream_gravity(stream, 11)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["shell_events"] == 1
+    assert check_shell_shape(summary).passed
 
 
 # --- Section 24: contact extensions ---

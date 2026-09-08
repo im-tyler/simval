@@ -214,6 +214,29 @@ def subset_energy(bodies) -> float:
     return ke + pe
 
 
+def shell_count(n: int) -> int:
+    """Spec section 25: S = min(4, max(1, n div 3)) for n >= 1."""
+    return min(4, max(1, n // 3))
+
+
+def shell_assignment(radii):
+    """Spec section 25: rank shells — sort by (radius, id), split into S
+    equal-count groups (first n mod S groups one larger)."""
+    n = len(radii)
+    if n == 0:
+        return []
+    order = sorted(range(n), key=lambda i: (radii[i], i))
+    s = shell_count(n)
+    q, rem = divmod(n, s)
+    shells = [0] * n
+    pos = 0
+    for k in range(s):
+        for _ in range(q + (1 if k < rem else 0)):
+            shells[order[pos]] = k
+            pos += 1
+    return shells
+
+
 class GravityWorld:
     def __init__(self, seed: int, count: int, profile: str | None = None) -> None:
         self.seed = seed
@@ -234,6 +257,7 @@ class GravityWorld:
         self.tick = 0
         self.mp_enabled = True
         self.radial_enabled = False
+        self.shells_enabled = False
         self.contacts = False
         self.contact_params = False
         self.restitution = 0.0
@@ -355,22 +379,31 @@ class GravityWorld:
         self.region_coarse[region] = False
 
     def _collapse(self, region: int, t: int) -> None:
+        x0 = (region % 2) * 64.0
+        y0 = (region // 2) * 64.0
+        # Spec section 26: collapse terminates the region's own window —
+        # every coarse body of the region materializes its evaluation at
+        # t (out-of-box bodies leave as unmanaged fine, refit exit rule).
         for i in range(len(self.bodies)):
             if self.coarse[i] is not None and self.body_region[i] == region:
                 self.bodies[i] = self._state_at(i, t)
                 self.coarse[i] = None
                 self.body_region[i] = UNMANAGED
         self.region_coarse[region] = False
-        x0 = (region % 2) * 64.0
-        y0 = (region // 2) * 64.0
-        members = [
-            i
-            for i in range(len(self.bodies))
-            if self.bodies[i]["x"] >= x0
-            and self.bodies[i]["x"] < x0 + 64.0
-            and self.bodies[i]["y"] >= y0
-            and self.bodies[i]["y"] < y0 + 64.0
-        ]
+        # Spec section 26 membership: evaluated state at t, collapsed
+        # bodies excluded (the section 14 demote rule).
+        members = []
+        for i in range(len(self.bodies)):
+            if self.body_collapsed[i] is not None:
+                continue
+            b = self._state_at(i, t)
+            if b["x"] >= x0 and b["x"] < x0 + 64.0 and b["y"] >= y0 and b["y"] < y0 + 64.0:
+                members.append(i)
+        for i in members:
+            if self.coarse[i] is not None:
+                self.bodies[i] = self._state_at(i, t)
+                self.coarse[i] = None
+                self.body_region[i] = UNMANAGED
         mass = 0.0
         mx = 0.0
         my = 0.0
@@ -398,6 +431,25 @@ class GravityWorld:
                 qxx += b["mass"] * dx * dx
                 qxy += b["mass"] * dx * dy
                 qyy += b["mass"] * dy * dy
+            radii = []
+            for i in members:
+                b = self.bodies[i]
+                dx = b["x"] - com_x
+                dy = b["y"] - com_y
+                radii.append(math.sqrt(dx * dx + dy * dy))
+            shells = shell_assignment(radii)
+            shell_bindings = [0.0, 0.0, 0.0, 0.0]
+            for a in range(len(members)):
+                for b in range(a + 1, len(members)):
+                    if shells[a] != shells[b]:
+                        continue
+                    ba = self.bodies[members[a]]
+                    bb = self.bodies[members[b]]
+                    dx = bb["x"] - ba["x"]
+                    dy = bb["y"] - ba["y"]
+                    shell_bindings[shells[a]] += (
+                        ba["mass"] * bb["mass"] / math.sqrt(dx * dx + dy * dy + EPS2)
+                    )
         else:
             com_x = 0.0
             com_y = 0.0
@@ -408,6 +460,7 @@ class GravityWorld:
             qxx = 0.0
             qxy = 0.0
             qyy = 0.0
+            shell_bindings = [0.0, 0.0, 0.0, 0.0]
         binding = 0.0
         for a in range(len(members)):
             for b in range(a + 1, len(members)):
@@ -456,12 +509,14 @@ class GravityWorld:
             "spread": spread,
             "multipole": self.mp_enabled,
             "radial": self.radial_enabled,
+            "shells": self.shells_enabled,
             "mx": mx,
             "my": my,
             "qxx": qxx,
             "qxy": qxy,
             "qyy": qyy,
             "binding": binding,
+            "shell_bindings": shell_bindings,
         }
         self.region_collapsed[region] = rec
         self.last_collapses.append(rec)
@@ -476,6 +531,8 @@ class GravityWorld:
         transformed = False
         sigma = 1.0
         fl = None
+        shell_groups = []
+        sigma_vertex = False
         if members:
             if rec["multipole"]:
                 base = {i: rec["jitter"][i] for i in members}
@@ -520,9 +577,12 @@ class GravityWorld:
                                     dx, dy = dhat[i]
                                     base[i] = (a00 * dx, a10 * dx + a11 * dy)
                                 transformed = True
-                if rec["radial"]:
+                if rec["shells"]:
+                    fl, shell_groups = self._shell_scale(members, rec, base)
+                    sigma, sigma_vertex = self._solve_sigma(members, rec, rec["energy"] + fl)
+                elif rec["radial"]:
                     fl = self._radial_scale(members, rec, base)
-                    sigma = self._solve_sigma(members, rec, rec["energy"] + fl)
+                    sigma, _ = self._solve_sigma(members, rec, rec["energy"] + fl)
                 sum_mx = 0.0
                 sum_my = 0.0
                 for i in members[:-1]:
@@ -567,6 +627,10 @@ class GravityWorld:
             "multipole": bool(rec["multipole"]),
             "transformed": transformed,
             "radial": bool(rec["radial"]),
+            "shells": bool(rec["shells"]),
+            "shell_groups": [list(g) for g in shell_groups],
+            "sigma_vertex": sigma_vertex,
+            "target_shell_bindings": list(rec["shell_bindings"]),
             "target_com_x": rec["com_x"],
             "target_com_y": rec["com_y"],
             "target_mx": rec["mx"],
@@ -627,6 +691,103 @@ class GravityWorld:
             base[i] = (base[i][0] - wx, base[i][1] - wy)
         return f(lam)
 
+    def _shell_scale(self, members, rec, base):
+        """Spec section 25: global binding scale then per-shell corrections.
+
+        Returns (F_total, solve-time shell groups).
+        """
+        n = len(members)
+        if n < 2:
+            return 0.0, []
+        all_pairs = []
+        for a in range(n):
+            for b in range(a + 1, n):
+                w = self.bodies[members[a]]["mass"] * self.bodies[members[b]]["mass"]
+                dx = base[members[b]][0] - base[members[a]][0]
+                dy = base[members[b]][1] - base[members[a]][1]
+                all_pairs.append((w, dx * dx + dy * dy))
+
+        def solve(pairs, target):
+            def f(lam):
+                total = 0.0
+                for w, d2 in pairs:
+                    total += w / math.sqrt(lam * lam * d2 + 1.0)
+                return total
+
+            if target >= f(0.0):
+                return 0.0
+            hi = 1.0
+            doublings = 0
+            while f(hi) > target and doublings < 64:
+                hi *= 2.0
+                doublings += 1
+            lo = 0.0
+            for _ in range(128):
+                mid = (lo + hi) * 0.5
+                if f(mid) >= target:
+                    lo = mid
+                else:
+                    hi = mid
+            return (lo + hi) * 0.5
+
+        lam = solve(all_pairs, rec["binding"])
+        for i in members:
+            base[i] = (lam * base[i][0], lam * base[i][1])
+        swx = 0.0
+        swy = 0.0
+        for i in members:
+            m = self.bodies[i]["mass"]
+            swx += m * base[i][0]
+            swy += m * base[i][1]
+        cx = swx / rec["mass"]
+        cy = swy / rec["mass"]
+        radii = []
+        for i in members:
+            dx = base[i][0] - cx
+            dy = base[i][1] - cy
+            radii.append(math.sqrt(dx * dx + dy * dy))
+        shells = shell_assignment(radii)
+        s = shell_count(n)
+        pairs = [[] for _ in range(s)]
+        for a in range(n):
+            for b in range(a + 1, n):
+                if shells[a] != shells[b]:
+                    continue
+                w = self.bodies[members[a]]["mass"] * self.bodies[members[b]]["mass"]
+                dx = base[members[b]][0] - base[members[a]][0]
+                dy = base[members[b]][1] - base[members[a]][1]
+                pairs[shells[a]].append((w, dx * dx + dy * dy))
+        mus = [1.0, 1.0, 1.0, 1.0]
+        for k in range(s):
+            target = rec["shell_bindings"][k]
+            if not pairs[k] or target <= 0.0:
+                continue
+            mus[k] = solve(pairs[k], target)
+        for slot, i in enumerate(members):
+            mu = mus[shells[slot]]
+            base[i] = (mu * base[i][0], mu * base[i][1])
+        swx = 0.0
+        swy = 0.0
+        for i in members:
+            m = self.bodies[i]["mass"]
+            swx += m * base[i][0]
+            swy += m * base[i][1]
+        wx = swx / rec["mass"]
+        wy = swy / rec["mass"]
+        for i in members:
+            base[i] = (base[i][0] - wx, base[i][1] - wy)
+        ft = 0.0
+        for a in range(n):
+            for b in range(a + 1, n):
+                w = self.bodies[members[a]]["mass"] * self.bodies[members[b]]["mass"]
+                dx = base[members[b]][0] - base[members[a]][0]
+                dy = base[members[b]][1] - base[members[a]][1]
+                ft += w / math.sqrt(dx * dx + dy * dy + 1.0)
+        groups = [[] for _ in range(s)]
+        for slot, i in enumerate(members):
+            groups[shells[slot]].append(i)
+        return ft, groups
+
     def _synth_velocities(self, members, rec, sigma):
         out = {}
         sum_mv_x = 0.0
@@ -662,13 +823,13 @@ class GravityWorld:
         b = (c1 - cm) * 0.5
         disc = b * b - 4.0 * a * (c0 - k_target)
         if a == 0.0:
-            return 0.0
+            return 0.0, True
         if disc < 0.0:
-            return (0.0 - b) / (2.0 * a)
+            return (0.0 - b) / (2.0 * a), True
         sq = math.sqrt(disc)
         r1 = ((0.0 - b) + sq) / (2.0 * a)
         r2 = ((0.0 - b) - sq) / (2.0 * a)
-        return r1 if r1 * r1 <= r2 * r2 else r2
+        return (r1 if r1 * r1 <= r2 * r2 else r2), False
 
     def _refit(self, region: int, t: int) -> None:
         x0 = (region % 2) * 64.0
@@ -1327,6 +1488,10 @@ def parse_stream_v2(path):
             vals = struct.unpack_from("<ddB", data, offset)
             offset += 17
             records.append(("params", *vals))
+        elif tag == 13:
+            vals = struct.unpack_from("<QIIddddd", data, offset)
+            offset += 56
+            records.append(("shells", *vals))
         else:
             raise ValueError(f"unknown record tag {tag} at offset {offset - 1}")
     return (world_w, world_h, body_count), records
@@ -1347,12 +1512,14 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
     pending_multipole = []
     pending_contact = []
     pending_radial = []
+    pending_shells = []
     params_seen = False
     max_pos_dev = 0.0
     post_exp_dev = 0.0
     collapse_events = 0
     multipole_events = 0
     radial_events = 0
+    shell_events = 0
     contact_events = 0
     contact_worst_vn_after = 0.0
     contact_min_jn = float("inf")
@@ -1361,6 +1528,7 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
     collapse_energy_deltas = []
     multipole_deltas = []
     radial_deltas = []
+    shell_deltas = []
 
     for record in records:
         kind = record[0]
@@ -1375,6 +1543,8 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
             pending_contact.append(record)
         elif kind == "radial":
             pending_radial.append(record)
+        elif kind == "shells":
+            pending_shells.append(record)
         elif kind == "params":
             _, restitution, friction, walls = record
             if params_seen or last_tick != 0:
@@ -1404,6 +1574,7 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
             _, tick = record
             world.mp_enabled = bool(pending_multipole)
             world.radial_enabled = world.radial_enabled or bool(pending_radial)
+            world.shells_enabled = world.shells_enabled or bool(pending_shells)
             if pending_contact:
                 world.contacts = True
             for region, level in pending:
@@ -1529,6 +1700,35 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
                                 "actual": local["binding"],
                             }
                         )
+                srec = next(
+                    (m for m in pending_shells if m[1] == tick_c and (m[3] * 2 + m[2]) == region),
+                    None,
+                )
+                if srec is not None:
+                    pending_shells.remove(srec)
+                    compared += 1
+                    shell_events += 1
+                    if struct.pack("<d", srec[4]) != struct.pack("<d", local["binding"]):
+                        mismatches.append(
+                            {
+                                "tick": tick_c,
+                                "field": "shells_binding",
+                                "expected": srec[4],
+                                "actual": local["binding"],
+                            }
+                        )
+                    for slot in range(4):
+                        if struct.pack("<d", srec[5 + slot]) != struct.pack(
+                            "<d", local["shell_bindings"][slot]
+                        ):
+                            mismatches.append(
+                                {
+                                    "tick": tick_c,
+                                    "field": f"shells_b{slot}",
+                                    "expected": srec[5 + slot],
+                                    "actual": local["shell_bindings"][slot],
+                                }
+                            )
             pending_collapsed.clear()
             for mrec in pending_multipole:
                 mismatches.append(
@@ -1550,6 +1750,16 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
                     }
                 )
             pending_radial.clear()
+            for srec in pending_shells:
+                mismatches.append(
+                    {
+                        "tick": tick,
+                        "field": "shells_record",
+                        "expected": None,
+                        "actual": f"RegionShells without RegionCollapsed for region {srec[3] * 2 + srec[2]}",
+                    }
+                )
+            pending_shells.clear()
             for local in world.last_collapses:
                 mismatches.append(
                     {
@@ -1611,6 +1821,51 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
                         )
                         radial_deltas.append(
                             (exp["tick"], exp["region"], dipole, quad, binding_rel, energy_delta)
+                        )
+                    elif exp.get("shells"):
+                        by_id = {b["id"]: b for b in bodies}
+                        worst_group = 0.0
+                        for k, group in enumerate(exp["shell_groups"]):
+                            gb = [by_id[i] for i in group]
+                            if len(gb) < 2:
+                                continue
+                            group_binding = 0.0
+                            for a in range(len(gb)):
+                                for b2 in range(a + 1, len(gb)):
+                                    dx = gb[b2]["x"] - gb[a]["x"]
+                                    dy = gb[b2]["y"] - gb[a]["y"]
+                                    group_binding += (
+                                        gb[a]["mass"]
+                                        * gb[b2]["mass"]
+                                        / math.sqrt(dx * dx + dy * dy + EPS2)
+                                    )
+                            target = exp["target_shell_bindings"][k]
+                            rel = abs(group_binding - target) / max(abs(target), 1e-30)
+                            worst_group = max(worst_group, rel)
+                        total_binding = 0.0
+                        for a in range(len(bodies)):
+                            for b2 in range(a + 1, len(bodies)):
+                                dx = bodies[b2]["x"] - bodies[a]["x"]
+                                dy = bodies[b2]["y"] - bodies[a]["y"]
+                                total_binding += (
+                                    bodies[a]["mass"]
+                                    * bodies[b2]["mass"]
+                                    / math.sqrt(dx * dx + dy * dy + EPS2)
+                                )
+                        total_rel = abs(total_binding - exp["target_binding"]) / max(
+                            abs(exp["target_binding"]), 1e-30
+                        )
+                        shell_deltas.append(
+                            (
+                                exp["tick"],
+                                exp["region"],
+                                dipole,
+                                quad,
+                                worst_group,
+                                total_rel,
+                                energy_delta,
+                                bool(exp.get("sigma_vertex")),
+                            )
                         )
                     else:
                         multipole_deltas.append((exp["tick"], exp["region"], dipole, quad, energy_delta))
@@ -1713,6 +1968,8 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
         "multipole_deltas": multipole_deltas,
         "radial_events": radial_events,
         "radial_deltas": radial_deltas,
+        "shell_events": shell_events,
+        "shell_deltas": shell_deltas,
         "post_expansion_deviation": post_exp_dev,
         "contact_events": contact_events,
         "contact_run": world.contacts,
@@ -1919,6 +2176,84 @@ def check_radial_shape(
                 "quadrupole": quad_tol,
             },
             "note": None if expanded else "no radial expansion in stream; shape unmeasured",
+        },
+    )
+
+
+def check_shell_shape(
+    summary: dict,
+    *,
+    dipole_tol: float = 1e-12,
+    binding_tol: float = 1e-9,
+    energy_tol: float = 1e-9,
+    total_tol: float = 2.0,
+    vertex_tol: float = 1.0,
+    quad_tol: float = 16.0,
+) -> DiagnosticResult:
+    """Spec section 25: per-shell radial synthesis.
+
+    Each shell's intra-shell binding, measured on the final synthesized
+    positions over the expansion's solve-time shell membership (rank
+    shells of the globally scaled base — deterministic replay state),
+    closes on its RegionShells record; the synthesized-set total energy
+    closes on the RegionCollapsed energy; the dipole closes on (mx, my).
+    The total binding is retained (the global scale closes it exactly;
+    the per-shell corrections trade a bounded total deviation for
+    per-shell exactness) and the quadrupole closes only to the
+    per-shell scale mix — both reported and bounded, the honest trades.
+    """
+    deltas = summary.get("shell_deltas", [])
+    worst_dipole = 0.0
+    worst_binding = 0.0
+    worst_energy = 0.0
+    worst_total = 0.0
+    worst_quad = 0.0
+    worst_vertex_energy = 0.0
+    vertex_cycles = 0
+    for _, _, dipole, quad, binding, total, energy, vertex in deltas:
+        worst_dipole = max(worst_dipole, dipole)
+        worst_binding = max(worst_binding, binding)
+        worst_quad = max(worst_quad, quad)
+        worst_total = max(worst_total, total)
+        if vertex:
+            vertex_cycles += 1
+            worst_vertex_energy = max(worst_vertex_energy, energy)
+        else:
+            worst_energy = max(worst_energy, energy)
+    expanded = bool(deltas)
+    return DiagnosticResult(
+        name="ontos_shell_shape",
+        passed=(
+            not expanded
+            or (
+                worst_dipole <= dipole_tol
+                and worst_binding <= binding_tol
+                and worst_energy <= energy_tol
+                and worst_total <= total_tol
+                and worst_vertex_energy <= vertex_tol
+                and worst_quad <= quad_tol
+            )
+        ),
+        threshold=float(binding_tol),
+        value=float(max(worst_dipole, worst_binding, worst_energy)),
+        detail={
+            "shell_expansions": len(deltas),
+            "worst_dipole_relative": worst_dipole,
+            "worst_shell_binding_relative": worst_binding,
+            "worst_total_binding_relative": worst_total,
+            "worst_energy_relative": worst_energy,
+            "worst_quadrupole_relative": worst_quad,
+            "vertex_cycles": vertex_cycles,
+            "worst_vertex_energy_relative": worst_vertex_energy,
+            "tolerances": {
+                "dipole": dipole_tol,
+                "shell_binding": binding_tol,
+                "total_binding": total_tol,
+                "energy": energy_tol,
+                "vertex_energy": vertex_tol,
+                "quadrupole": quad_tol,
+            },
+            "note": None if expanded else "no shell expansion in stream; shape unmeasured",
         },
     )
 
