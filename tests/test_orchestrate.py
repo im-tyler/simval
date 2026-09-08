@@ -43,6 +43,12 @@ GRID = [
      "observer": 777},
     {"name": "collapse", "mode": "gravity", "ticks": 40, "seed": 42, "bodies": 8,
      "events": [["collapse-at", 6, 0, 0], ["expand-at", 36, 0, 0]]},
+    {"name": "radial", "mode": "gravity", "ticks": 40, "seed": 42, "bodies": 8, "radial": True,
+     "events": [["collapse-at", 6, 0, 0], ["expand-at", 36, 0, 0]]},
+    {"name": "restitution", "mode": "gravity", "ticks": 40, "seed": 11, "bodies": 16,
+     "contacts": True, "restitution": 0.5, "friction": 0.25},
+    {"name": "walls", "mode": "gravity", "ticks": 40, "seed": 22, "bodies": 8,
+     "walls": True},
 ]
 
 
@@ -62,6 +68,13 @@ def test_grid_verifies_clean(tmp_path):
     collapse = results[3]
     assert collapse["collapse_events"] == 1
     assert collapse["expand_events"] == 1
+    radial = results[4]
+    assert radial["radial_events"] == 1
+    assert radial["radial_worst"] < 1e-9
+    restitution = results[5]
+    assert restitution["contact_events"] >= 1
+    walls = results[6]
+    assert walls["contact_events"] >= 0
 
 
 @requires_bin

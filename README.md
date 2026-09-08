@@ -19,7 +19,7 @@ Working name; the folder may be renamed. See `PLAN.md` for the full thesis and `
 |---|---|---|---|
 | `gromacs` (format-agnostic) | molecular dynamics | GROMACS, OpenMM | conserved-energy drift, RMSD/RMSF, charge, H-bonds |
 | `nbody-rebound` | celestial mechanics | REBOUND (IAS15) | energy + angular-momentum + COM conservation |
-| `ontos` | discrete multiscale (life v1) + nbody gravity with Chebyshev ephemeris windows, zoom policy, collapse + multipole reconstruction, contact dynamics + modal audio (v2) | independent spec reimplementation | stream records vs reference, bit-exact state hashes, bounded window drift, zoom-policy conformance, collapse reconstruction error, multipole dipole/quadrupole closure, contact impulse invariants, bit-exact WAV/audio-hash resynthesis, REBOUND anchor (<1e-4) |
+| `ontos` | discrete multiscale (life v1) + nbody gravity with Chebyshev ephemeris windows, zoom policy, collapse + multipole + radial-shape reconstruction, contact dynamics (restitution/friction/static/walls) + modal audio (v2) | independent spec reimplementation | stream records vs reference, bit-exact state hashes, bounded window drift, zoom-policy conformance, collapse reconstruction error, multipole dipole/quadrupole closure, radial binding/energy closure, contact impulse invariants (incl. -e*vn restitution closure), bit-exact WAV/audio-hash resynthesis (incl. pseudo-id static contactants), REBOUND anchor (<1e-4) |
 | `wave-fdtd` | waves / PDE | built-in leapfrog FDTD | CFL stability + energy boundedness |
 | `fluid-lbm` | fluids / CFD | built-in D2Q9 LBM | BGK τ stability + exact mass conservation |
 | `em-fdtd` | electromagnetism | built-in 2D TMz Yee | Courant condition + EM energy boundedness |

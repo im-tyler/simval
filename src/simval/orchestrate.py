@@ -115,9 +115,29 @@ def normalize_spec(spec: dict, index: int = 0) -> dict:
         "events": [],
         "observer": None,
         "contacts": False,
+        "radial": False,
+        "restitution": None,
+        "friction": None,
+        "walls": False,
     }
     if mode == "gravity":
         out["contacts"] = bool(spec.get("contacts", False))
+        out["radial"] = bool(spec.get("radial", False))
+        out["walls"] = bool(spec.get("walls", False))
+        if out["walls"]:
+            out["contacts"] = True
+        if spec.get("restitution") is not None:
+            e = float(spec["restitution"])
+            if not 0.0 <= e <= 1.0:
+                raise ValueError(f"{name}: restitution must be in [0,1], got {e}")
+            out["restitution"] = e
+            out["contacts"] = True
+        if spec.get("friction") is not None:
+            fr = float(spec["friction"])
+            if fr < 0.0:
+                raise ValueError(f"{name}: friction must be >= 0, got {fr}")
+            out["friction"] = fr
+            out["contacts"] = True
     if mode == "gravity" and spec.get("observer") is not None:
         out["observer"] = int(spec["observer"])
     for event in spec.get("events", []):
@@ -163,6 +183,14 @@ def _cli_args(spec: dict, stream_path: Path) -> list[str]:
             args += ["--observer", str(spec["observer"])]
         if spec["contacts"]:
             args += ["--contacts"]
+        if spec["radial"]:
+            args += ["--radial"]
+        if spec["restitution"] is not None:
+            args += ["--restitution", str(spec["restitution"])]
+        if spec["friction"] is not None:
+            args += ["--friction", str(spec["friction"])]
+        if spec["walls"]:
+            args += ["--walls"]
     else:
         for kind, rx, ry in spec["events"]:
             args += [f"--{kind}", str(rx), str(ry)]
@@ -220,6 +248,9 @@ def verify_run(run_dir) -> dict:
         mp_worst = 0.0
         for _, _, dipole, quad, _energy in summary.get("multipole_deltas", []):
             mp_worst = max(mp_worst, dipole, quad)
+        rad_worst = 0.0
+        for _, _, dipole, quad, binding, energy in summary.get("radial_deltas", []):
+            rad_worst = max(rad_worst, binding, energy)
         row.update(
             {
                 "max_position_deviation": summary["max_position_deviation"],
@@ -231,6 +262,8 @@ def verify_run(run_dir) -> dict:
                 "collapse_energy_worst": worst,
                 "multipole_events": summary.get("multipole_events", 0),
                 "multipole_worst": mp_worst,
+                "radial_events": summary.get("radial_events", 0),
+                "radial_worst": rad_worst,
                 "contact_events": summary.get("contact_events", 0),
             }
         )

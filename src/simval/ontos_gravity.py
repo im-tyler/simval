@@ -24,6 +24,8 @@ DEGREE = 8
 SAMPLES = 33
 UNMANAGED = 255
 CONTACT_R = 2.0
+MONOPOLE_BASE = 0xFF000000
+WALL_BASE = 0xFFFFFF00
 TWO_POW_NEG64 = 2.0**-64
 
 
@@ -172,7 +174,12 @@ class GravityWorld:
         self.events: dict[int, list[tuple[int, int]]] = {}
         self.tick = 0
         self.mp_enabled = True
+        self.radial_enabled = False
         self.contacts = False
+        self.contact_params = False
+        self.restitution = 0.0
+        self.friction = 0.0
+        self.walls = False
         self.touching: set[tuple[int, int]] = set()
         self.last_contacts: list[dict] = []
         px = 0.0
@@ -342,6 +349,14 @@ class GravityWorld:
             qxx = 0.0
             qxy = 0.0
             qyy = 0.0
+        binding = 0.0
+        for a in range(len(members)):
+            for b in range(a + 1, len(members)):
+                ba = self.bodies[members[a]]
+                bb = self.bodies[members[b]]
+                dx = bb["x"] - ba["x"]
+                dy = bb["y"] - ba["y"]
+                binding += ba["mass"] * bb["mass"] / math.sqrt(dx * dx + dy * dy + EPS2)
         rng = SplitMix64(self.seed ^ ((region * 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF))
         jitter = {}
         for i in members:
@@ -381,11 +396,13 @@ class GravityWorld:
             "jitter": jitter,
             "spread": spread,
             "multipole": self.mp_enabled,
+            "radial": self.radial_enabled,
             "mx": mx,
             "my": my,
             "qxx": qxx,
             "qxy": qxy,
             "qyy": qyy,
+            "binding": binding,
         }
         self.region_collapsed[region] = rec
         self.last_collapses.append(rec)
@@ -398,6 +415,8 @@ class GravityWorld:
         members = rec["members"]
         states = []
         transformed = False
+        sigma = 1.0
+        fl = None
         if members:
             if rec["multipole"]:
                 base = {i: rec["jitter"][i] for i in members}
@@ -442,6 +461,9 @@ class GravityWorld:
                                     dx, dy = dhat[i]
                                     base[i] = (a00 * dx, a10 * dx + a11 * dy)
                                 transformed = True
+                if rec["radial"]:
+                    fl = self._radial_scale(members, rec, base)
+                    sigma = self._solve_sigma(members, rec, rec["energy"] + fl)
                 sum_mx = 0.0
                 sum_my = 0.0
                 for i in members[:-1]:
@@ -462,8 +484,8 @@ class GravityWorld:
             sum_mvy = 0.0
             for i in members[:-1]:
                 sx, sy = rec["spread"][i]
-                self.bodies[i]["vx"] = rec["vcom_x"] + sx
-                self.bodies[i]["vy"] = rec["vcom_y"] + sy
+                self.bodies[i]["vx"] = rec["vcom_x"] + sigma * sx
+                self.bodies[i]["vy"] = rec["vcom_y"] + sigma * sy
                 sum_mvx += self.bodies[i]["mass"] * self.bodies[i]["vx"]
                 sum_mvy += self.bodies[i]["mass"] * self.bodies[i]["vy"]
             last = members[-1]
@@ -485,6 +507,7 @@ class GravityWorld:
             "bodies": [dict(b) for b in states],
             "multipole": bool(rec["multipole"]),
             "transformed": transformed,
+            "radial": bool(rec["radial"]),
             "target_com_x": rec["com_x"],
             "target_com_y": rec["com_y"],
             "target_mx": rec["mx"],
@@ -493,7 +516,100 @@ class GravityWorld:
             "target_qxy": rec["qxy"],
             "target_qyy": rec["qyy"],
             "target_energy": rec["energy"],
+            "target_binding": rec["binding"],
         }
+
+    def _radial_scale(self, members, rec, base):
+        """Spec section 23: binding-matched radial scale; returns F(lambda)."""
+        if len(members) < 2:
+            return 0.0
+        pairs = []
+        for a in range(len(members)):
+            for b in range(a + 1, len(members)):
+                w = self.bodies[members[a]]["mass"] * self.bodies[members[b]]["mass"]
+                dx = base[members[b]][0] - base[members[a]][0]
+                dy = base[members[b]][1] - base[members[a]][1]
+                pairs.append((w, dx * dx + dy * dy))
+
+        def f(lam):
+            total = 0.0
+            for w, d2 in pairs:
+                total += w / math.sqrt(lam * lam * d2 + 1.0)
+            return total
+
+        target = rec["binding"]
+        if target >= f(0.0):
+            lam = 0.0
+        else:
+            hi = 1.0
+            doublings = 0
+            while f(hi) > target and doublings < 64:
+                hi *= 2.0
+                doublings += 1
+            lo = 0.0
+            for _ in range(128):
+                mid = (lo + hi) * 0.5
+                if f(mid) >= target:
+                    lo = mid
+                else:
+                    hi = mid
+            lam = (lo + hi) * 0.5
+        for i in members:
+            base[i] = (lam * base[i][0], lam * base[i][1])
+        swx = 0.0
+        swy = 0.0
+        for i in members:
+            m = self.bodies[i]["mass"]
+            swx += m * base[i][0]
+            swy += m * base[i][1]
+        wx = swx / rec["mass"]
+        wy = swy / rec["mass"]
+        for i in members:
+            base[i] = (base[i][0] - wx, base[i][1] - wy)
+        return f(lam)
+
+    def _synth_velocities(self, members, rec, sigma):
+        out = {}
+        sum_mv_x = 0.0
+        sum_mv_y = 0.0
+        for slot, i in enumerate(members):
+            if slot + 1 < len(members):
+                sx, sy = rec["spread"][i]
+                vx = rec["vcom_x"] + sigma * sx
+                vy = rec["vcom_y"] + sigma * sy
+                sum_mv_x += self.bodies[i]["mass"] * vx
+                sum_mv_y += self.bodies[i]["mass"] * vy
+                out[i] = (vx, vy)
+            else:
+                out[i] = (
+                    (rec["px"] - sum_mv_x) / self.bodies[i]["mass"],
+                    (rec["py"] - sum_mv_y) / self.bodies[i]["mass"],
+                )
+        return out
+
+    def _synth_ke(self, members, rec, sigma):
+        vs = self._synth_velocities(members, rec, sigma)
+        ke = 0.0
+        for i in members:
+            vx, vy = vs[i]
+            ke += 0.5 * self.bodies[i]["mass"] * (vx * vx + vy * vy)
+        return ke
+
+    def _solve_sigma(self, members, rec, k_target):
+        c0 = self._synth_ke(members, rec, 0.0)
+        c1 = self._synth_ke(members, rec, 1.0)
+        cm = self._synth_ke(members, rec, -1.0)
+        a = ((c1 + cm) - (c0 + c0)) * 0.5
+        b = (c1 - cm) * 0.5
+        disc = b * b - 4.0 * a * (c0 - k_target)
+        if a == 0.0:
+            return 0.0
+        if disc < 0.0:
+            return (0.0 - b) / (2.0 * a)
+        sq = math.sqrt(disc)
+        r1 = ((0.0 - b) + sq) / (2.0 * a)
+        r2 = ((0.0 - b) - sq) / (2.0 * a)
+        return r1 if r1 * r1 <= r2 * r2 else r2
 
     def _refit(self, region: int, t: int) -> None:
         x0 = (region % 2) * 64.0
@@ -522,20 +638,54 @@ class GravityWorld:
         for i in keep:
             self.body_region[i] = region
 
+    def _static_impulse(self, i, nx, ny, vrx, vry):
+        """Spec section 24 one-sided impulse vs a frozen contactant."""
+        e = self.restitution
+        fr = self.friction
+        mi = self.bodies[i]["mass"]
+        vn = vrx * nx + vry * ny
+        s = (1.0 + e) * vn
+        self.bodies[i]["vx"] += s * nx
+        self.bodies[i]["vy"] += s * ny
+        self.px += mi * (s * nx)
+        self.py += mi * (s * ny)
+        jn = (0.0 - s) * mi
+        if fr > 0.0:
+            vt = (0.0 - vrx) * ny + vry * nx
+            jt = vt * mi
+            jt_max = fr * jn
+            if jt > jt_max:
+                jt = jt_max
+            if jt < 0.0 - jt_max:
+                jt = 0.0 - jt_max
+            w = jt / mi
+            self.bodies[i]["vx"] += w * (0.0 - ny)
+            self.bodies[i]["vy"] += w * nx
+            self.px += jt * (0.0 - ny)
+            self.py += jt * nx
+        return vn, jn
+
     def _contact_pass(self, entering: int, frozen) -> None:
-        """Spec section 21: single pinned lexicographic impulse pass."""
+        """Spec sections 21 + 24: single pinned lexicographic impulse pass."""
         radii = [CONTACT_R * math.sqrt(b["mass"]) for b in self.bodies]
+        e = self.restitution
+        fr = self.friction
+        extended = self.contact_params
+        n = len(self.bodies)
         nxt = set()
         events = []
-        n = len(self.bodies)
         for i in range(n):
             if frozen[i]:
                 continue
             for j in range(i + 1, n):
-                if frozen[j]:
+                if self.body_collapsed[j] is not None:
                     continue
-                dx = self.bodies[j]["x"] - self.bodies[i]["x"]
-                dy = self.bodies[j]["y"] - self.bodies[i]["y"]
+                coarse_j = self.coarse[j] is not None
+                if coarse_j and not extended:
+                    continue
+                sj = self._state_at(j, entering)
+                dx = sj["x"] - self.bodies[i]["x"]
+                dy = sj["y"] - self.bodies[i]["y"]
                 rs = radii[i] + radii[j]
                 d2 = dx * dx + dy * dy
                 if d2 >= rs * rs:
@@ -549,41 +699,172 @@ class GravityWorld:
                     dist = math.sqrt(d2)
                     nx = dx / dist
                     ny = dy / dist
-                vrx = self.bodies[j]["vx"] - self.bodies[i]["vx"]
-                vry = self.bodies[j]["vy"] - self.bodies[i]["vy"]
+                vrx = sj["vx"] - self.bodies[i]["vx"]
+                vry = sj["vy"] - self.bodies[i]["vy"]
                 vn = vrx * nx + vry * ny
                 if vn >= 0.0:
                     continue
                 mi = self.bodies[i]["mass"]
                 mj = self.bodies[j]["mass"]
-                cx = (self.bodies[i]["x"] + self.bodies[j]["x"]) * 0.5
-                cy = (self.bodies[i]["y"] + self.bodies[j]["y"]) * 0.5
-                inv = 1.0 / (mi + mj)
-                t = vn * inv
-                fi = t * mj
-                fj = t * mi
-                self.bodies[i]["vx"] += fi * nx
-                self.bodies[i]["vy"] += fi * ny
-                self.bodies[j]["vx"] -= fj * nx
-                self.bodies[j]["vy"] -= fj * ny
+                cx = (self.bodies[i]["x"] + sj["x"]) * 0.5
+                cy = (self.bodies[i]["y"] + sj["y"]) * 0.5
+                if not coarse_j:
+                    inv = 1.0 / (mi + mj)
+                    t = vn * inv
+                    s = (1.0 + e) * t
+                    fi = s * mj
+                    fj = s * mi
+                    self.bodies[i]["vx"] += fi * nx
+                    self.bodies[i]["vy"] += fi * ny
+                    self.bodies[j]["vx"] -= fj * nx
+                    self.bodies[j]["vy"] -= fj * ny
+                    mu = (mi * mj) / (mi + mj)
+                    jn = ((0.0 - vn) * (1.0 + e)) * mu
+                    if fr > 0.0:
+                        vt = (0.0 - vrx) * ny + vry * nx
+                        q = vt * inv
+                        qmax = (fr * jn) * inv
+                        if q > qmax:
+                            q = qmax
+                        if q < 0.0 - qmax:
+                            q = 0.0 - qmax
+                        fti = q * mj
+                        ftj = q * mi
+                        self.bodies[i]["vx"] += fti * (0.0 - ny)
+                        self.bodies[i]["vy"] += fti * nx
+                        self.bodies[j]["vx"] -= ftj * (0.0 - ny)
+                        self.bodies[j]["vy"] -= ftj * nx
+                else:
+                    _, jn = self._static_impulse(i, nx, ny, vrx, vry)
+                    mu = mi
                 if pair in self.touching:
                     continue
                 vn_after = (
                     (self.bodies[j]["vx"] - self.bodies[i]["vx"]) * nx
                     + (self.bodies[j]["vy"] - self.bodies[i]["vy"]) * ny
                 )
-                mu = (mi * mj) / (mi + mj)
                 events.append(
                     {
                         "tick": entering,
                         "a": i,
                         "b": j,
-                        "jn": -vn * mu,
+                        "jn": jn,
                         "cx": cx,
                         "cy": cy,
+                        "vn": vn,
                         "vn_after": vn_after,
+                        "mu": mu,
                     }
                 )
+        if extended:
+            for region in range(4):
+                rec = self.region_collapsed[region]
+                if rec is None or rec["count"] == 0:
+                    continue
+                big_r = CONTACT_R * math.sqrt(rec["mass"])
+                for i in range(n):
+                    if frozen[i]:
+                        continue
+                    dx = rec["com_x"] - self.bodies[i]["x"]
+                    dy = rec["com_y"] - self.bodies[i]["y"]
+                    rs = radii[i] + big_r
+                    d2 = dx * dx + dy * dy
+                    if d2 >= rs * rs:
+                        continue
+                    pair = (i, MONOPOLE_BASE + region)
+                    nxt.add(pair)
+                    if d2 == 0.0:
+                        nx = 1.0
+                        ny = 0.0
+                    else:
+                        dist = math.sqrt(d2)
+                        nx = dx / dist
+                        ny = dy / dist
+                    vrx = rec["vcom_x"] - self.bodies[i]["vx"]
+                    vry = rec["vcom_y"] - self.bodies[i]["vy"]
+                    vn = vrx * nx + vry * ny
+                    if vn >= 0.0:
+                        continue
+                    mi = self.bodies[i]["mass"]
+                    cx = (self.bodies[i]["x"] + rec["com_x"]) * 0.5
+                    cy = (self.bodies[i]["y"] + rec["com_y"]) * 0.5
+                    _, jn = self._static_impulse(i, nx, ny, vrx, vry)
+                    mu = (mi * rec["mass"]) / (mi + rec["mass"])
+                    if pair in self.touching:
+                        continue
+                    vn_after = (rec["vcom_x"] - self.bodies[i]["vx"]) * nx + (
+                        rec["vcom_y"] - self.bodies[i]["vy"]
+                    ) * ny
+                    events.append(
+                        {
+                            "tick": entering,
+                            "a": i,
+                            "b": MONOPOLE_BASE + region,
+                            "jn": jn,
+                            "cx": cx,
+                            "cy": cy,
+                            "vn": vn,
+                            "vn_after": vn_after,
+                            "mu": mu,
+                        }
+                    )
+        if self.walls:
+            for i in range(n):
+                if frozen[i]:
+                    continue
+                for wall in range(4):
+                    if wall == 0:
+                        if not (self.bodies[i]["x"] - radii[i] < 0.0 and self.bodies[i]["vx"] < 0.0):
+                            continue
+                        nx = 0.0 - 1.0
+                        ny = 0.0
+                        cx = (self.bodies[i]["x"] + 0.0) * 0.5
+                        cy = self.bodies[i]["y"]
+                    elif wall == 1:
+                        if not (self.bodies[i]["x"] + radii[i] > 128.0 and self.bodies[i]["vx"] > 0.0):
+                            continue
+                        nx = 1.0
+                        ny = 0.0
+                        cx = (self.bodies[i]["x"] + 128.0) * 0.5
+                        cy = self.bodies[i]["y"]
+                    elif wall == 2:
+                        if not (self.bodies[i]["y"] - radii[i] < 0.0 and self.bodies[i]["vy"] < 0.0):
+                            continue
+                        nx = 0.0
+                        ny = 0.0 - 1.0
+                        cx = self.bodies[i]["x"]
+                        cy = (self.bodies[i]["y"] + 0.0) * 0.5
+                    else:
+                        if not (self.bodies[i]["y"] + radii[i] > 128.0 and self.bodies[i]["vy"] > 0.0):
+                            continue
+                        nx = 0.0
+                        ny = 1.0
+                        cx = self.bodies[i]["x"]
+                        cy = (self.bodies[i]["y"] + 128.0) * 0.5
+                    pair = (i, WALL_BASE + wall)
+                    nxt.add(pair)
+                    vrx = 0.0 - self.bodies[i]["vx"]
+                    vry = 0.0 - self.bodies[i]["vy"]
+                    vn = vrx * nx + vry * ny
+                    if vn >= 0.0:
+                        continue
+                    vn, jn = self._static_impulse(i, nx, ny, vrx, vry)
+                    if pair in self.touching:
+                        continue
+                    vn_after = (0.0 - self.bodies[i]["vx"]) * nx + (0.0 - self.bodies[i]["vy"]) * ny
+                    events.append(
+                        {
+                            "tick": entering,
+                            "a": i,
+                            "b": WALL_BASE + wall,
+                            "jn": jn,
+                            "cx": cx,
+                            "cy": cy,
+                            "vn": vn,
+                            "vn_after": vn_after,
+                            "mu": self.bodies[i]["mass"],
+                        }
+                    )
         self.touching = nxt
         self.last_contacts.extend(events)
 
@@ -970,6 +1251,14 @@ def parse_stream_v2(path):
             vals = struct.unpack_from("<QIIddd", data, offset)
             offset += 40
             records.append(("contact", *vals))
+        elif tag == 11:
+            vals = struct.unpack_from("<QIId", data, offset)
+            offset += 24
+            records.append(("radial", *vals))
+        elif tag == 12:
+            vals = struct.unpack_from("<ddB", data, offset)
+            offset += 17
+            records.append(("params", *vals))
         else:
             raise ValueError(f"unknown record tag {tag} at offset {offset - 1}")
     return (world_w, world_h, body_count), records
@@ -989,15 +1278,20 @@ def verify_stream_gravity(path, seed: int) -> dict:
     pending_collapsed = []
     pending_multipole = []
     pending_contact = []
+    pending_radial = []
+    params_seen = False
     max_pos_dev = 0.0
     post_exp_dev = 0.0
     collapse_events = 0
     multipole_events = 0
+    radial_events = 0
     contact_events = 0
     contact_worst_vn_after = 0.0
     contact_min_jn = float("inf")
+    static_contact_events = 0
     collapse_energy_deltas = []
     multipole_deltas = []
+    radial_deltas = []
 
     for record in records:
         kind = record[0]
@@ -1010,9 +1304,37 @@ def verify_stream_gravity(path, seed: int) -> dict:
             pending_multipole.append(record)
         elif kind == "contact":
             pending_contact.append(record)
+        elif kind == "radial":
+            pending_radial.append(record)
+        elif kind == "params":
+            _, restitution, friction, walls = record
+            if params_seen or last_tick != 0:
+                mismatches.append(
+                    {
+                        "tick": last_tick,
+                        "field": "contact_params",
+                        "expected": "at most one, before the first tick",
+                        "actual": record,
+                    }
+                )
+            if not (0.0 <= restitution <= 1.0) or friction < 0.0 or walls > 1:
+                mismatches.append(
+                    {
+                        "tick": last_tick,
+                        "field": "contact_params",
+                        "expected": "restitution in [0,1], friction >= 0, walls in {0,1}",
+                        "actual": record,
+                    }
+                )
+            params_seen = True
+            world.contact_params = True
+            world.restitution = restitution
+            world.friction = friction
+            world.walls = walls == 1
         elif kind == "tick":
             _, tick = record
             world.mp_enabled = bool(pending_multipole)
+            world.radial_enabled = world.radial_enabled or bool(pending_radial)
             if pending_contact:
                 world.contacts = True
             for region, level in pending:
@@ -1039,8 +1361,11 @@ def verify_stream_gravity(path, seed: int) -> dict:
                     _, tick_c, body_a, body_b, jn, cx, cy = rec
                     compared += 1
                     contact_events += 1
-                    contact_worst_vn_after = max(contact_worst_vn_after, abs(local["vn_after"]))
+                    residual = local["vn_after"] + world.restitution * local["vn"]
+                    contact_worst_vn_after = max(contact_worst_vn_after, abs(residual))
                     contact_min_jn = min(contact_min_jn, jn)
+                    if body_b >= MONOPOLE_BASE:
+                        static_contact_events += 1
                     if (
                         tick_c != local["tick"]
                         or body_a != local["a"]
@@ -1116,6 +1441,23 @@ def verify_stream_gravity(path, seed: int) -> dict:
                     ):
                         if struct.pack("<d", got) != struct.pack("<d", want):
                             mismatches.append({"tick": tick_c, "field": name, "expected": got, "actual": want})
+                rrec = next(
+                    (m for m in pending_radial if m[1] == tick_c and (m[3] * 2 + m[2]) == region),
+                    None,
+                )
+                if rrec is not None:
+                    pending_radial.remove(rrec)
+                    compared += 1
+                    radial_events += 1
+                    if struct.pack("<d", rrec[4]) != struct.pack("<d", local["binding"]):
+                        mismatches.append(
+                            {
+                                "tick": tick_c,
+                                "field": "radial_binding",
+                                "expected": rrec[4],
+                                "actual": local["binding"],
+                            }
+                        )
             pending_collapsed.clear()
             for mrec in pending_multipole:
                 mismatches.append(
@@ -1127,6 +1469,16 @@ def verify_stream_gravity(path, seed: int) -> dict:
                     }
                 )
             pending_multipole.clear()
+            for rrec in pending_radial:
+                mismatches.append(
+                    {
+                        "tick": tick,
+                        "field": "radial_record",
+                        "expected": None,
+                        "actual": f"RegionRadial without RegionCollapsed for region {rrec[3] * 2 + rrec[2]}",
+                    }
+                )
+            pending_radial.clear()
             for local in world.last_collapses:
                 mismatches.append(
                     {
@@ -1172,7 +1524,25 @@ def verify_stream_gravity(path, seed: int) -> dict:
                     energy_delta = abs(subset_energy(exp["bodies"]) - exp["target_energy"]) / max(
                         abs(exp["target_energy"]), 1.0
                     )
-                    multipole_deltas.append((exp["tick"], exp["region"], dipole, quad, energy_delta))
+                    if exp.get("radial"):
+                        binding = 0.0
+                        for a in range(len(bodies)):
+                            for b2 in range(a + 1, len(bodies)):
+                                dx = bodies[b2]["x"] - bodies[a]["x"]
+                                dy = bodies[b2]["y"] - bodies[a]["y"]
+                                binding += (
+                                    bodies[a]["mass"]
+                                    * bodies[b2]["mass"]
+                                    / math.sqrt(dx * dx + dy * dy + EPS2)
+                                )
+                        binding_rel = abs(binding - exp["target_binding"]) / max(
+                            abs(exp["target_binding"]), 1e-30
+                        )
+                        radial_deltas.append(
+                            (exp["tick"], exp["region"], dipole, quad, binding_rel, energy_delta)
+                        )
+                    else:
+                        multipole_deltas.append((exp["tick"], exp["region"], dipole, quad, energy_delta))
         elif kind == "snapshot":
             compared += 1
         elif kind == "totals":
@@ -1270,11 +1640,15 @@ def verify_stream_gravity(path, seed: int) -> dict:
         "collapse_energy_deltas": collapse_energy_deltas,
         "multipole_events": multipole_events,
         "multipole_deltas": multipole_deltas,
+        "radial_events": radial_events,
+        "radial_deltas": radial_deltas,
         "post_expansion_deviation": post_exp_dev,
         "contact_events": contact_events,
         "contact_run": world.contacts,
+        "contact_restitution": world.restitution if params_seen else 0.0,
         "contact_worst_vn_after": contact_worst_vn_after,
         "contact_min_jn": contact_min_jn if contact_events else 0.0,
+        "static_contact_events": static_contact_events,
         "final_world_hash": world.world_hash(),
     }
 
@@ -1388,16 +1762,17 @@ def check_multipole_match(summary: dict, *, dipole_tol: float = 1e-12, quad_tol:
 
 
 def check_contact_resolution(summary: dict, *, vn_tol: float = 1e-12) -> DiagnosticResult:
-    """Spec section 21: contact impulse invariants.
+    """Spec sections 21 + 24: contact impulse invariants.
 
     Every emitted record must carry a positive impulse, and the relative
     normal speed of a resolving pair, measured immediately after its own
-    impulse, must close on zero within rounding of the impulse
+    impulse, must close on -e * vn within rounding of the impulse
     arithmetic (later impulses in the same pass may perturb other
     pairs; the next tick's pass resolves those).
     """
     events = summary.get("contact_events", 0)
     has_contacts = events > 0
+    e = summary.get("contact_restitution", 0.0)
     worst_vn = summary.get("contact_worst_vn_after", 0.0)
     min_jn = summary.get("contact_min_jn", 0.0)
     ok = (not has_contacts) or (min_jn > 0.0 and worst_vn <= vn_tol)
@@ -1408,9 +1783,70 @@ def check_contact_resolution(summary: dict, *, vn_tol: float = 1e-12) -> Diagnos
         value=float(worst_vn),
         detail={
             "contact_events": events,
+            "static_contact_events": summary.get("static_contact_events", 0),
+            "restitution": e,
             "min_jn": min_jn,
-            "worst_post_impulse_vn": worst_vn,
+            "worst_post_impulse_residual": worst_vn,
             "note": None if has_contacts else "no contact records in stream; resolution unmeasured",
+        },
+    )
+
+
+def check_radial_shape(
+    summary: dict,
+    *,
+    dipole_tol: float = 1e-12,
+    binding_tol: float = 1e-9,
+    energy_tol: float = 1e-9,
+    quad_tol: float = 4.0,
+) -> DiagnosticResult:
+    """Spec section 23: binding-matched radial-shape synthesis.
+
+    The synthesized set's internal potential (binding formula over the
+    synthesized positions) must close on the RegionRadial record, its
+    total energy on the RegionCollapsed energy (the radial scale plus
+    the spread-scale quadratic drive both to rounding), and its dipole
+    on (mx, my). The quadrupole closes only to lambda^2 of the record
+    (the radial scale trades tensor exactness for binding exactness);
+    it is reported and bounded, not exact.
+    """
+    deltas = summary.get("radial_deltas", [])
+    worst_dipole = 0.0
+    worst_binding = 0.0
+    worst_energy = 0.0
+    worst_quad = 0.0
+    for _, _, dipole, quad, binding, energy in deltas:
+        worst_dipole = max(worst_dipole, dipole)
+        worst_binding = max(worst_binding, binding)
+        worst_energy = max(worst_energy, energy)
+        worst_quad = max(worst_quad, quad)
+    expanded = bool(deltas)
+    return DiagnosticResult(
+        name="ontos_radial_shape",
+        passed=(
+            not expanded
+            or (
+                worst_dipole <= dipole_tol
+                and worst_binding <= binding_tol
+                and worst_energy <= energy_tol
+                and worst_quad <= quad_tol
+            )
+        ),
+        threshold=float(binding_tol),
+        value=float(max(worst_dipole, worst_binding, worst_energy)),
+        detail={
+            "radial_expansions": len(deltas),
+            "worst_dipole_relative": worst_dipole,
+            "worst_binding_relative": worst_binding,
+            "worst_energy_relative": worst_energy,
+            "worst_quadrupole_relative": worst_quad,
+            "tolerances": {
+                "dipole": dipole_tol,
+                "binding": binding_tol,
+                "energy": energy_tol,
+                "quadrupole": quad_tol,
+            },
+            "note": None if expanded else "no radial expansion in stream; shape unmeasured",
         },
     )
 

@@ -27,13 +27,15 @@ def test_silence_is_zero_pcm():
 
 
 def test_known_excitation_pins_hash():
-    pcm = synthesize([(5, 1.25, 0.75, 0.3), (40, 2.0, 1.5, 0.05)], 100)
+    mu_a = (1.25 * 0.75) / (1.25 + 0.75)
+    mu_b = (2.0 * 1.5) / (2.0 + 1.5)
+    pcm = synthesize([(5, mu_a, 0.3), (40, mu_b, 0.05)], 100)
     assert audio_hash(pcm) == 0xAF22AA8908656DBD
-    assert pcm == synthesize([(5, 1.25, 0.75, 0.3), (40, 2.0, 1.5, 0.05)], 100)
+    assert pcm == synthesize([(5, mu_a, 0.3), (40, mu_b, 0.05)], 100)
 
 
 def test_ring_decays_to_silence():
-    pcm = synthesize([(0, 1.0, 1.0, 0.8)], 300)
+    pcm = synthesize([(0, (1.0 * 1.0) / (1.0 + 1.0), 0.8)], 300)
     peak = max(abs(struct.unpack_from("<h", pcm, i)[0]) for i in range(0, len(pcm), 2))
     assert peak > 8000
     start = (64 + RING) * 2
@@ -76,7 +78,7 @@ def test_excitations_use_tick_body_masses():
     assert len(excitations) == 5
     first = excitations[0]
     assert first[0] == 1
-    assert first[1] > 0.0 and first[2] > 0.0 and first[3] > 0.0
+    assert first[1] > 0.0 and first[2] > 0.0
 
 
 def test_cli_expect_mismatch_fails(tmp_path):
@@ -88,3 +90,49 @@ def test_cli_expect_mismatch_fails(tmp_path):
     assert (tmp_path / "a.wav").read_bytes() == (
         CONTACT_EXAMPLES / "contact" / "ontos.wav"
     ).read_bytes()
+
+
+def test_walls_example_wav_matches():
+    # Includes two collapsed-region monopole contacts: the pseudo-id mu
+    # rule (reduced mass vs the RegionCollapsed mass) must hold for the
+    # resynthesis to stay bit-identical.
+    pcm, digest = synthesize_stream(CONTACT_EXAMPLES / "walls" / "ontos.stream")
+    recorded = (CONTACT_EXAMPLES / "walls" / "ontos.wav").read_bytes()
+    assert wav_bytes(pcm) == recorded
+    assert digest == 0x70A1D0539170B265
+
+
+def test_restitution_example_wav_matches():
+    pcm, digest = synthesize_stream(CONTACT_EXAMPLES / "restitution" / "ontos.stream")
+    recorded = (CONTACT_EXAMPLES / "restitution" / "ontos.wav").read_bytes()
+    assert wav_bytes(pcm) == recorded
+    assert digest == 0xC4317E51BCE80E83
+
+
+def test_monopole_mu_uses_collapse_mass():
+    from simval.ontos_gravity import MONOPOLE_BASE, parse_stream_v2
+
+    _, records = parse_stream_v2(CONTACT_EXAMPLES / "walls" / "ontos.stream")
+    excitations, _ = collect_excitations(records)
+    masses = {}
+    collapse_mass = {}
+    contacts = []
+    for record in records:
+        if record[0] == "body":
+            masses[record[2]] = record[9]
+        elif record[0] == "collapsed":
+            collapse_mass[record[3] * 2 + record[2]] = record[5]
+        elif record[0] == "contact":
+            contacts.append(record)
+    want = []
+    for record in contacts:
+        _, tick, a, b, jn, _cx, _cy = record
+        ma = masses[a]
+        if b >= MONOPOLE_BASE:
+            m = collapse_mass[b - MONOPOLE_BASE]
+            mu = (ma * m) / (ma + m)
+        else:
+            mu = (ma * masses[b]) / (ma + masses[b])
+        want.append((tick, mu, jn))
+    assert any(r[3] >= MONOPOLE_BASE for r in contacts)
+    assert excitations == want

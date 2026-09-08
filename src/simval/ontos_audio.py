@@ -29,8 +29,16 @@ AMP = (0.5, 0.3, 0.2)
 
 
 def collect_excitations(records):
-    """Stream-order (tick, mass_a, mass_b, jn) excitations + final tick."""
+    """Stream-order (tick, mu, jn) excitations + final tick.
+
+    mu follows spec section 22 with the section 24 amendment: body pairs
+    use the reduced mass of the two bodies; wall pseudo ids (>=
+    0xFFFFFF00) are infinitely massive (mu = m_a); collapsed-region
+    monopole pseudo ids (>= 0xFF000000) use the reduced mass against
+    the region's RegionCollapsed mass.
+    """
     masses = {}
+    collapse_mass = {}
     contacts = []
     last_tick = 0
     for record in records:
@@ -38,14 +46,25 @@ def collect_excitations(records):
         if kind == "body":
             _, _tick, bid, _region, _level, _x, _y, _vx, _vy, mass = record
             masses[bid] = mass
+        elif kind == "collapsed":
+            _, _tick, rx, ry, _count, mass, _com_x, _com_y, _px, _py, _energy = record
+            collapse_mass[ry * 2 + rx] = mass
         elif kind == "contact":
             _, tick, body_a, body_b, jn, _cx, _cy = record
             contacts.append((tick, body_a, body_b, jn))
         elif kind == "tick":
             last_tick = record[1]
-    excitations = [
-        (tick, masses[body_a], masses[body_b], jn) for tick, body_a, body_b, jn in contacts
-    ]
+    excitations = []
+    for tick, body_a, body_b, jn in contacts:
+        ma = masses[body_a]
+        if body_b >= 0xFFFFFF00:
+            mu = ma
+        elif body_b >= 0xFF000000:
+            m = collapse_mass[body_b - 0xFF000000]
+            mu = (ma * m) / (ma + m)
+        else:
+            mu = (ma * masses[body_b]) / (ma + masses[body_b])
+        excitations.append((tick, mu, jn))
     return excitations, last_tick
 
 
@@ -53,9 +72,8 @@ def synthesize(excitations, final_tick):
     """Spec section 22: (pcm bytes, fnv hash, sample count)."""
     n = (final_tick + TAIL_BLOCKS) * SAMPLES_PER_TICK
     buf = [0.0] * n
-    for tick, mass_a, mass_b, jn in excitations:
+    for tick, mu, jn in excitations:
         e = (tick + 1) * SAMPLES_PER_TICK
-        mu = (mass_a * mass_b) / (mass_a + mass_b)
         for k in range(3):
             omega = OMEGA0 * PARTIAL[k] / mu
             a = (2.0 - omega) * RHO[k]

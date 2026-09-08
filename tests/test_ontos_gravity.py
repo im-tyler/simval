@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import struct
 from pathlib import Path
 
@@ -9,13 +10,16 @@ import pytest
 
 from simval.context import select_engine
 from simval.ontos_gravity import (
+    MONOPOLE_BASE,
     UNMANAGED,
+    WALL_BASE,
     GravityWorld,
     SplitMix64,
     check_bounded_drift,
     check_collapse_energy,
     check_contact_resolution,
     check_multipole_match,
+    check_radial_shape,
     check_reconstruction_error,
     check_reference_match_gravity,
     region_at,
@@ -173,19 +177,30 @@ def test_rebound_anchor_agrees():
 # --- Section 19: collapse and reconstruction ---
 
 
-def _emit_gravity_stream(path, seed, count, schedule, ticks, contacts=False):
+def _emit_gravity_stream(path, seed, count, schedule, ticks, contacts=False, radial=False, params=None):
     """Serialize a reference gravity run per the spec section 16 emission contract.
 
     schedule: list of (tick, region_index, level) with level 0 demote,
     1 promote/expand, 2 collapse. Collapse events additionally emit the
-    section 19 RegionCollapsed record before that tick's TickHeader.
+    section 19 RegionCollapsed record (and RegionMultipole /
+    RegionRadial when the modes are on) before that tick's TickHeader.
     contacts: spec section 21 mode — emits Contact records (tag 10) in
     generation order before that tick's TickHeader.
+    radial: spec section 23 mode — collapses emit RegionRadial (tag 11).
+    params: optional (restitution, friction, walls) tuple — emits
+    ContactParams (tag 12) before the first TickHeader.
     """
     world = GravityWorld(seed, count)
     world.contacts = contacts
+    world.radial_enabled = radial
+    if params is not None:
+        world.contact_params = True
+        world.restitution, world.friction, walls = params
+        world.walls = bool(walls)
     out = bytearray(b"ONTO")
     out += struct.pack("<IIII", 2, 128, 128, count)
+    if params is not None:
+        out += b"\x0c" + struct.pack("<ddB", params[0], params[1], 1 if params[2] else 0)
     events = {}
     for t, region, level in schedule:
         world.schedule(t, region, level)
@@ -221,6 +236,14 @@ def _emit_gravity_stream(path, seed, count, schedule, ticks, contacts=False):
                     c["qxy"],
                     c["qyy"],
                 )
+                if c["radial"]:
+                    out += b"\x0b" + struct.pack(
+                        "<QIId",
+                        c["tick"],
+                        c["region"] % 2,
+                        c["region"] // 2,
+                        c["binding"],
+                    )
         world.last_collapses.clear()
         for c in world.last_contacts:
             out += b"\x0a" + struct.pack(
@@ -712,6 +735,304 @@ def test_engine_diagnose_contact_run(tmp_path):
 
     run = tmp_path / "ontos_run"
     shutil.copytree(CONTACT_EXAMPLES / "contact", run)
+    engine = select_engine(run)
+    assert engine.name == "ontos"
+    ctx = engine.load_context(run, selection="default")
+    results = run_checks(ctx)
+    names = {r.name for r in results}
+    assert "ontos_contact_resolution" in names
+    assert "ontos_audio_match" in names
+    assert all(r.passed for r in results if r.name.startswith("ontos_"))
+
+
+# --- Section 23: radial-shape synthesis ---
+
+
+def test_radial_roundtrip_self_consistent(tmp_path):
+    order, _ = _region_occupancy(42, 8, 5)
+    region = order[0]
+    stream = tmp_path / "radial.stream"
+    _emit_gravity_stream(stream, 42, 8, [(6, region, 2), (36, region, 1)], 80, radial=True)
+    summary = verify_stream_gravity(stream, 42)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["collapse_events"] == 1
+    assert summary["radial_events"] == 1
+    assert summary["expand_events"] == 1
+    result = check_radial_shape(summary)
+    assert result.passed, result.detail
+    assert result.detail["worst_dipole_relative"] <= 1e-12
+    assert result.detail["worst_binding_relative"] <= 1e-9
+    assert result.detail["worst_energy_relative"] <= 1e-9
+    assert result.detail["worst_quadrupole_relative"] <= 4.0
+
+
+def test_radial_recorded_stream_verifies():
+    summary = verify_stream_gravity(EXAMPLES / "radial" / "ontos.stream", 17)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["ticks_verified"] == 240
+    assert summary["radial_events"] == 3
+    assert summary["expand_events"] == 3
+    result = check_radial_shape(summary)
+    assert result.passed, result.detail
+    # Measured: energy closes at rounding, binding at bisection precision.
+    assert result.detail["worst_energy_relative"] < 1e-6
+    assert result.detail["worst_binding_relative"] < 1e-9
+    assert check_reconstruction_error(summary).passed
+
+
+def test_radial_energy_delta_beats_section20():
+    # Same seed/schedule with and without --radial: the section 20 energy
+    # delta is O(0.1-1) (tensor match does not pin pair distances); the
+    # section 23 closure drives it to rounding.
+    order, _ = _region_occupancy(7, 12, 5)
+    region = order[0]
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        plain = Path(td) / "plain.stream"
+        rad = Path(td) / "rad.stream"
+        _emit_gravity_stream(plain, 7, 12, [(6, region, 2), (36, region, 1)], 60)
+        _emit_gravity_stream(rad, 7, 12, [(6, region, 2), (36, region, 1)], 60, radial=True)
+        s20 = verify_stream_gravity(plain, 7)
+        s23 = verify_stream_gravity(rad, 7)
+    worst_20 = max(d[4] for d in s20["multipole_deltas"])
+    worst_23 = max(d[5] for d in s23["radial_deltas"])
+    assert worst_23 < 1e-6
+    assert worst_20 > 100 * worst_23
+
+
+def test_tampered_radial_record_fails(tmp_path):
+    order, _ = _region_occupancy(42, 8, 5)
+    stream = tmp_path / "ontos.stream"
+    _emit_gravity_stream(stream, 42, 8, [(6, order[0], 2), (36, order[0], 1)], 40, radial=True)
+    data = bytearray(stream.read_bytes())
+    sizes = {1: 9, 2: 9, 3: 17, 4: 10, 5: 34, 6: 55, 7: 57, 8: 73, 9: 57, 10: 41, 11: 25}
+    off = 20
+    flipped = False
+    while off < len(data):
+        tag = data[off]
+        if tag == 11 and not flipped:
+            data[off + 17] ^= 0x01  # low byte of binding
+            flipped = True
+            break
+        off += sizes[tag]
+    assert flipped
+    corrupt = tmp_path / "corrupt.stream"
+    corrupt.write_bytes(bytes(data))
+    summary = verify_stream_gravity(corrupt, 42)
+    assert summary["mismatch_count"] > 0
+    assert not check_reference_match_gravity(summary).passed
+
+
+def test_radial_two_body_cycle_closes():
+    world = None
+    for seed in range(100_000):
+        w = GravityWorld(seed, 2)
+        if all(64.0 <= b["x"] < 128.0 and 64.0 <= b["y"] < 128.0 for b in w.bodies):
+            world = w
+            break
+    w = world
+    w.radial_enabled = True
+    w.schedule(1, 3, 2)
+    w.schedule(30, 3, 1)
+    for _ in range(30):
+        w.step()
+    exp = w.last_expansion
+    assert exp is not None and exp["radial"]
+    b0, b1 = exp["bodies"]
+    dx = b1["x"] - b0["x"]
+    dy = b1["y"] - b0["y"]
+    binding = b0["mass"] * b1["mass"] / math.sqrt(dx * dx + dy * dy + 1.0)
+    rel = abs(binding - exp["target_binding"]) / max(abs(exp["target_binding"]), 1e-30)
+    assert rel < 1e-9, rel
+
+
+def test_engine_diagnose_radial_run(tmp_path):
+    import shutil
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(EXAMPLES / "radial", run)
+    engine = select_engine(run)
+    assert engine.name == "ontos"
+    ctx = engine.load_context(run, selection="default")
+    results = run_checks(ctx)
+    names = {r.name for r in results}
+    assert "ontos_radial_shape" in names
+    assert all(r.passed for r in results if r.name.startswith("ontos_"))
+
+
+# --- Section 24: contact extensions ---
+
+
+def test_restitution_emitter_reproduces_recorded_stream(tmp_path):
+    out = tmp_path / "restitution.stream"
+    _emit_gravity_stream(out, 11, 32, [], 400, contacts=True, params=(0.5, 0.25, 0))
+    assert out.read_bytes() == (CONTACT_EXAMPLES / "restitution" / "ontos.stream").read_bytes()
+
+
+def test_walls_emitter_reproduces_recorded_stream(tmp_path):
+    out = tmp_path / "walls.stream"
+    _emit_gravity_stream(
+        out, 22, 24, [(5, 2, 2), (200, 2, 1), (260, 2, 2)], 600, contacts=True, params=(0.0, 0.0, 1)
+    )
+    assert out.read_bytes() == (CONTACT_EXAMPLES / "walls" / "ontos.stream").read_bytes()
+
+
+def test_restitution_stream_verifies():
+    summary = verify_stream_gravity(CONTACT_EXAMPLES / "restitution" / "ontos.stream", 11)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["contact_events"] >= 3
+    assert summary["contact_restitution"] == 0.5
+    assert check_contact_resolution(summary).passed
+    assert summary["contact_worst_vn_after"] < 1e-12
+    assert summary["contact_min_jn"] > 0.0
+
+
+def test_walls_stream_verifies_with_static_contacts():
+    summary = verify_stream_gravity(CONTACT_EXAMPLES / "walls" / "ontos.stream", 22)
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["contact_events"] >= 4
+    assert summary["static_contact_events"] == 2
+    assert summary["contact_run"] is True
+    assert check_contact_resolution(summary).passed
+    assert check_multipole_match(summary).passed
+
+
+def test_restitution_and_friction_keep_ledger_exact_all_fine():
+    world = GravityWorld(11, 32)
+    world.contacts = True
+    world.contact_params = True
+    world.restitution = 0.5
+    world.friction = 0.25
+    px0, py0 = world.px, world.py
+    impulses = 0
+    for _ in range(400):
+        world.step()
+        impulses += len(world.last_contacts)
+        world.last_contacts.clear()
+    assert impulses >= 3
+    assert world.px == px0
+    assert world.py == py0
+
+
+def test_friction_kills_tangential_relative_velocity():
+    # Constructed overlapping pair with a tangential approach; friction
+    # far inside the Coulomb cone (friction = 10) so the impulse is
+    # unclamped and the tangential relative velocity closes on zero to
+    # rounding of the construction (gravity perturbs it at ~4e-4).
+    world = GravityWorld(3, 2)
+    world.contacts = True
+    world.contact_params = True
+    world.friction = 10.0
+    world.bodies[0]["x"] = 40.0
+    world.bodies[0]["y"] = 40.0
+    world.bodies[1]["x"] = 42.0
+    world.bodies[1]["y"] = 40.0
+    world.bodies[0]["vx"] = 0.0
+    world.bodies[0]["vy"] = 0.0
+    world.bodies[1]["vx"] = -0.1
+    world.bodies[1]["vy"] = 0.3
+    world.step()
+    assert len(world.last_contacts) == 1
+    dx = world.bodies[1]["x"] - world.bodies[0]["x"]
+    dy = world.bodies[1]["y"] - world.bodies[0]["y"]
+    d = math.sqrt(dx * dx + dy * dy)
+    tx = -(dy / d)
+    ty = dx / d
+    vt = (world.bodies[1]["vx"] - world.bodies[0]["vx"]) * tx + (
+        world.bodies[1]["vy"] - world.bodies[0]["vy"]
+    ) * ty
+    assert abs(vt) < 1e-3, f"tangential velocity after unclamped friction {vt}"
+    world.last_contacts.clear()
+
+
+def test_wall_bounce_reflects_and_books_ledger():
+    world = GravityWorld(3, 1)
+    world.contacts = True
+    world.contact_params = True
+    world.walls = True
+    world.restitution = 0.5
+    world.friction = 0.25
+    world.bodies[0]["x"] = -1.0
+    world.bodies[0]["y"] = 50.0
+    world.bodies[0]["vx"] = -0.5
+    world.bodies[0]["vy"] = 0.25
+    m = world.bodies[0]["mass"]
+    px0, py0 = world.px, world.py
+    world.step()
+    events = world.last_contacts
+    assert len(events) == 1
+    c = events[0]
+    assert c["b"] == WALL_BASE
+    assert c["jn"] > 0.0
+    assert abs(world.bodies[0]["vx"] - 0.25) < 1e-12
+    assert abs(world.bodies[0]["vy"] - 0.0625) < 1e-12
+    s = (1.0 + 0.5) * -0.5
+    assert abs(world.px - (px0 + m * (s * (0.0 - 1.0)))) < 1e-12
+    assert abs(world.py - (py0 + 0.1875 * m * (0.0 - 1.0))) < 1e-12
+    world.last_contacts.clear()
+
+
+def test_monopole_contact_one_sided_frozen_totals():
+    world = None
+    for seed in range(100_000):
+        w = GravityWorld(seed, 5)
+        in3 = sum(
+            1
+            for b in w.bodies
+            if 64.0 <= b["x"] < 128.0 and 64.0 <= b["y"] < 128.0
+        )
+        if in3 >= 3 and w.bodies[0]["x"] < 64.0:
+            world = w
+            break
+    w = world
+    w.contacts = True
+    w.contact_params = True
+    w.restitution = 0.5
+    w.schedule(1, 3, 2)
+    w.step()
+    rec = w.region_collapsed[3]
+    w.bodies[0]["x"] = rec["com_x"] - 2.0
+    w.bodies[0]["y"] = rec["com_y"]
+    w.bodies[0]["vx"] = rec["vcom_x"] + 1.0
+    w.bodies[0]["vy"] = rec["vcom_y"]
+    mi = w.bodies[0]["mass"]
+    w.step()
+    events = w.last_contacts
+    assert len(events) == 1
+    c = events[0]
+    assert c["b"] == MONOPOLE_BASE + 3
+    expected_jn = (0.0 - c["vn"]) * (1.0 + 0.5) * mi
+    assert abs(c["jn"] - expected_jn) < 1e-12
+    assert abs(c["vn_after"] - (0.0 - c["vn"] * 0.5)) < 1e-12
+    after = w.region_collapsed[3]
+    assert (after["com_x"], after["com_y"], after["vcom_x"], after["vcom_y"]) == (
+        rec["com_x"],
+        rec["com_y"],
+        rec["vcom_x"],
+        rec["vcom_y"],
+    )
+    w.last_contacts.clear()
+
+
+def test_contact_params_after_first_tick_rejected(tmp_path):
+    stream = tmp_path / "ontos.stream"
+    _emit_gravity_stream(stream, 11, 8, [], 10, contacts=True, params=(0.5, 0.25, 0))
+    data = bytearray(stream.read_bytes())
+    record = bytes(data[20:38])  # the 1 + 17 byte ContactParams record
+    del data[20:38]
+    data += record  # now after every tick
+    moved = tmp_path / "moved.stream"
+    moved.write_bytes(bytes(data))
+    summary = verify_stream_gravity(moved, 11)
+    assert summary["mismatch_count"] > 0
+
+
+def test_engine_diagnose_walls_run(tmp_path):
+    import shutil
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(CONTACT_EXAMPLES / "walls", run)
     engine = select_engine(run)
     assert engine.name == "ontos"
     ctx = engine.load_context(run, selection="default")

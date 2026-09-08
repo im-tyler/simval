@@ -41,6 +41,7 @@ class OntosEngine(EngineAdapter):
                 check_collapse_energy,
                 check_contact_resolution,
                 check_multipole_match,
+                check_radial_shape,
                 check_reconstruction_error,
                 check_zoom_policy,
                 parse_stream_v2,
@@ -54,6 +55,8 @@ class OntosEngine(EngineAdapter):
                 extra_checks.append(check_collapse_energy(summary))
                 if summary.get("multipole_events", 0):
                     extra_checks.append(check_multipole_match(summary))
+                if summary.get("radial_events", 0):
+                    extra_checks.append(check_radial_shape(summary))
             if summary.get("contact_run", False):
                 extra_checks.append(check_contact_resolution(summary))
             observer = meta.get("observer")
