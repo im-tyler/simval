@@ -2,6 +2,9 @@
   "description": "Coupled reaction cycle",
   "engine": "chemical-kinetics",
   "force_field": "n/a",
+  "identity": {
+    "kinetics.json": "eb2cf3ddd1a8c06c9ae6e0c96cba7848d37627273fec9623b3806a16765b8886"
+  },
   "name": "kinetics_reaction",
   "reference_metrics": {
     "mass_balance_drift": 8.881784197001245e-16,

@@ -58,3 +58,39 @@ def test_oracle_wave_flags_unstable_end_to_end(tmp_path):
     (run / "wave.json").write_text(json.dumps(cfg))
     result = validate(run, "wave_pulse_stable")
     assert result.passed is False, "unstable scheme must be flagged as DRIFT by the oracle"
+
+
+# --- ORA-003: validation is bound to scenario identity ---
+
+
+def test_oracle_rejects_tampered_scenario_inputs(tmp_path):
+    import shutil
+
+    from simval.oracle import validate
+
+    run = tmp_path / "pulse"
+    shutil.copytree(Path(__file__).parent.parent / "examples" / "wave" / "pulse", run)
+    assert validate(run, "wave_pulse_stable").passed is True
+
+    cfg = json.loads((run / "wave.json").read_text())
+    cfg["dt"] = cfg["dt"] * 0.5  # same CFL-ish story, different scenario
+    (run / "wave.json").write_text(json.dumps(cfg))
+    result = validate(run, "wave_pulse_stable")
+    assert result.passed is False
+    assert "scenario identity mismatch" in result.detail["error"]
+    assert result.detail["identity"]["wave.json"]["problem"] == "content mismatch"
+
+
+def test_oracle_rejects_missing_scenario_input(tmp_path):
+    import shutil
+
+    from simval.oracle import validate
+
+    run = tmp_path / "pulse"
+    shutil.copytree(Path(__file__).parent.parent / "examples" / "wave" / "pulse", run)
+    (run / "wave.json").unlink()
+    result = validate(run, "wave_pulse_stable")
+    assert result.passed is False
+    # Engine detection keys off the scenario config; its absence is itself
+    # a fail-closed identity error.
+    assert "no engine recognized" in result.detail["error"]

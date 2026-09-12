@@ -30,3 +30,45 @@ def find_unique(run: Path, *patterns: str, what: str = "input"):
             f"found {[str(h) for h in hits]}"
         )
     return hits[0] if hits else None
+
+
+# --- MD input roles (audit GROM-001) -------------------------------------
+#
+# A normal GROMACS run-dir carries a structure (.gro/.pdb), a run topology
+# (.tpr), and possibly an Amber/CHARMM topology (.prmtop/.psf) — these are
+# ROLES, not mutually-exclusive alternatives. Only multiple candidates for
+# the SAME role are ambiguous. When several roles can serve as the
+# trajectory topology, the precedence below is deterministic and documented.
+
+STRUCTURE_PATTERNS = ("*.gro", "*.pdb")
+RUN_TOPOLOGY_PATTERNS = ("*.tpr",)
+ALTERNATE_TOPOLOGY_PATTERNS = ("*.prmtop", "*.psf")
+TRAJECTORY_PATTERNS = ("*.xtc", "*.dcd", "*.trr", "*.nc")
+
+
+def select_structure(run: Path):
+    """Structure role (.gro/.pdb): exactly one, or None."""
+    return find_unique(run, *STRUCTURE_PATTERNS, what="structure")
+
+
+def select_run_topology(run: Path):
+    """Run-topology role (.tpr): exactly one, or None."""
+    return find_unique(run, *RUN_TOPOLOGY_PATTERNS, what="run topology (tpr)")
+
+
+def select_alternate_topology(run: Path):
+    """Amber/CHARMM topology role (.prmtop/.psf): exactly one, or None."""
+    return find_unique(run, *ALTERNATE_TOPOLOGY_PATTERNS, what="topology (prmtop/psf)")
+
+
+def select_trajectory_topology(run: Path):
+    """Topology used to load the trajectory.
+
+    Documented precedence: structure (.gro/.pdb) > run topology (.tpr) >
+    Amber/CHARMM (.prmtop/.psf). Ambiguity is only an error WITHIN a role.
+    """
+    for select in (select_structure, select_run_topology, select_alternate_topology):
+        hit = select(run)
+        if hit is not None:
+            return hit
+    return None

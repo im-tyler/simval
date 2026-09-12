@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -404,13 +405,107 @@ def compare_metrics(
     return out
 
 
+def compute_identity(run_dir) -> dict[str, str]:
+    """Scenario identity of a candidate run (audit ORA-003): sha256 of every
+    scenario-defining input, keyed by file name. Deliberately cheap — file
+    selection and hashing only, no heavy engine imports — and computed the
+    same way for golden generation and validation."""
+    from simval._util import (
+        find_unique,
+        select_trajectory_topology,
+    )
+    from simval.context import select_engine
+
+    run = Path(run_dir)
+    engine = select_engine(run).name
+
+    def sha(p: Path) -> str:
+        import hashlib
+
+        h = hashlib.sha256()
+        with p.open("rb") as f:
+            for block in iter(lambda: f.read(1 << 16), b""):
+                h.update(block)
+        return h.hexdigest()
+
+    def identity_of(*paths: Path) -> dict[str, str]:
+        present = [p for p in paths if p is not None and p.exists()]
+        return {p.name: sha(p) for p in sorted(present, key=lambda p: p.name)}
+
+    if engine == "gromacs":
+        return identity_of(
+            select_trajectory_topology(run),
+            find_unique(run, *("*.xtc", "*.dcd", "*.trr", "*.nc"), what="trajectory"),
+            find_unique(run, "*.xvg", what="energy file (xvg)"),
+        )
+    if engine in ("nbody-rebound",):
+        return identity_of(run / "system.json")
+    if engine == "wave-fdtd":
+        return identity_of(run / "wave.json")
+    if engine == "fluid-lbm":
+        return identity_of(run / "fluid.json")
+    if engine == "em-fdtd":
+        return identity_of(run / "em.json")
+    if engine == "quantum-spin":
+        return identity_of(run / "quantum.json")
+    if engine == "heat-diffusion":
+        return identity_of(run / "diffusion.json")
+    if engine == "chemical-kinetics":
+        return identity_of(run / "kinetics.json")
+    if engine == "relativistic-boris":
+        return identity_of(run / "relativistic.json")
+    if engine == "qc-pyscf":
+        return identity_of(run / "molecule.json")
+    if engine == "qc-qiskit":
+        return identity_of(run / "circuit.json")
+    if engine == "fep":
+        manifest = run / "fep.json"
+        files: list[Path] = [manifest]
+        if manifest.exists():
+            m = json.loads(manifest.read_text())
+            for key in ("files", "reverse_files"):
+                for name in m.get(key) or []:
+                    files.append(run / str(name))
+        else:
+            from simval.fep import _discover
+
+            files += [run / n for n in _discover(run, reverse=False)]
+            files += [run / n for n in _discover(run, reverse=True)]
+        return identity_of(*files)
+    raise ValueError(f"no scenario-identity rule for engine {engine!r}")
+
+
+def _identity_result(case, run_engine: str, error: str, identity: dict | None = None) -> DiagnosticResult:
+    return DiagnosticResult(
+        name="reference_oracle",
+        passed=False,
+        threshold=0.0,
+        value=0.0,
+        detail={
+            "case": case.name,
+            "run_engine": run_engine,
+            "error": error,
+            "identity": identity or {},
+            "n_checked": 0,
+            "n_failed": 0,
+            "metrics": {},
+            "candidate_metrics": {},
+        },
+    )
+
+
 def validate(run_dir, case: ReferenceCase | str, *, selection: str | None = None) -> DiagnosticResult:
     if isinstance(case, str):
         from simval.oracle.cases import get_case
         case = get_case(case)
     run = Path(run_dir)
     from simval.context import select_engine
-    run_engine = select_engine(run).name
+    try:
+        run_engine = select_engine(run).name
+    except ValueError as e:
+        # Engine detection keys off the scenario config file itself; a run
+        # whose defining input is gone still fails closed with a clear error.
+        return _identity_result(case, "unknown", str(e)[:200])
     if case.engine and case.engine != run_engine:
         return DiagnosticResult(
             name="reference_oracle",
@@ -426,6 +521,62 @@ def validate(run_dir, case: ReferenceCase | str, *, selection: str | None = None
             },
         )
     sel = selection or case.selection
+    # --- Scenario identity gate (audit ORA-003) ---
+    # Metric agreement alone must never pass a candidate: the golden's
+    # scenario-defining inputs are compared exactly (name + sha256) before
+    # any metric is computed. Missing identity on either side fails closed.
+    if not case.identity:
+        return _identity_result(
+            case, run_engine, "golden carries no scenario identity; refusing to validate"
+        )
+    try:
+        candidate_identity = compute_identity(run)
+    except Exception as e:
+        return _identity_result(
+            case, run_engine, f"candidate identity could not be computed: {type(e).__name__}: {e}"[:200]
+        )
+    identity_detail = {}
+    identity_ok = True
+    for name, want_hash in sorted(case.identity.items()):
+        p = run / name
+        if not p.exists():
+            identity_detail[name] = {"golden": want_hash, "candidate": None, "problem": "missing input"}
+            identity_ok = False
+            continue
+        if name not in candidate_identity:
+            identity_detail[name] = {
+                "golden": want_hash, "candidate": None,
+                "problem": "present but not part of the candidate's scenario inputs",
+            }
+            identity_ok = False
+            continue
+        got_hash = candidate_identity[name]
+        entry = {"golden": want_hash, "candidate": got_hash}
+        if got_hash != want_hash:
+            entry["problem"] = "content mismatch"
+            identity_ok = False
+        identity_detail[name] = entry
+    undeclared = sorted(set(candidate_identity) - set(case.identity))
+    if undeclared:
+        identity_ok = False
+        identity_detail["__undeclared_inputs__"] = {"problem": undeclared}
+    if not identity_ok:
+        return DiagnosticResult(
+            name="reference_oracle",
+            passed=False,
+            threshold=0.0,
+            value=0.0,
+            detail={
+                "case": case.name,
+                "run_engine": run_engine,
+                "error": "scenario identity mismatch: the candidate is not the golden's scenario",
+                "identity": identity_detail,
+                "n_checked": 0,
+                "n_failed": 0,
+                "metrics": {},
+                "candidate_metrics": {},
+            },
+        )
     candidate = compute_metrics(run_dir, selection=sel)
     compared = compare_metrics(
         candidate, case.reference_metrics, case.tolerances, ignore=case.ignore

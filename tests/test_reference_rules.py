@@ -3,6 +3,7 @@ to exactly one comparison rule (audit ORA-001/GOLD-001 corpus property)."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -163,3 +164,76 @@ def test_malformed_tolerance_rules_rejected(spec):
 def test_wellformed_tolerance_rules_accepted():
     assert compare_metrics({"m": 1.0}, {"m": 1.0}, {"m": ["abs", 0.5]})["__passed__"]
     assert compare_metrics({"m": 1.0}, {"m": 1.0}, {"m": ["interval", 0.0, 2.0]})["__passed__"]
+
+
+# --- ORA-003: scenario identity is required and enforced ---
+
+
+def test_every_shipped_golden_carries_identity():
+    for name, case in load_all().items():
+        assert case.identity, f"{name}: no scenario identity"
+        for path, digest in case.identity.items():
+            assert "/" not in path and case.identity[path] == digest
+
+
+def test_golden_without_identity_fails_closed(tmp_path):
+    src = cases_mod._REFERENCES_DIR / "wave_pulse_stable.json"
+    d = json.loads(src.read_text())
+    del d["identity"]
+    path = tmp_path / "noidentity.json"
+    path.write_text(json.dumps(d))
+    with pytest.raises(ValueError, match="no scenario 'identity'"):
+        cases_mod._load(path)
+
+
+def test_golden_with_malformed_identity_rejected(tmp_path):
+    src = cases_mod._REFERENCES_DIR / "wave_pulse_stable.json"
+    d = json.loads(src.read_text())
+    d["identity"] = {"wave.json": "not-a-hash"}
+    path = tmp_path / "badhash.json"
+    path.write_text(json.dumps(d))
+    with pytest.raises(ValueError, match="sha256"):
+        cases_mod._load(path)
+    d["identity"] = {}
+    path = tmp_path / "empty.json"
+    path.write_text(json.dumps(d))
+    with pytest.raises(ValueError, match="no scenario 'identity'"):
+        cases_mod._load(path)
+
+
+def test_validate_missing_declared_input_fails_closed(tmp_path):
+    # The fep engine still detects the run via its dhdl.csv glob when the
+    # manifest is gone, but the golden declares fep.json: identity must
+    # fail closed before any metric runs (no alchemlyb needed).
+    import shutil
+
+    from simval.oracle import validate
+
+    src = Path(__file__).parent.parent / "examples" / "fep" / "synthetic"
+    run = tmp_path / "synthetic"
+    shutil.copytree(src, run)
+    (run / "fep.json").unlink()
+    result = validate(run, "fep_synthetic")
+    assert result.passed is False
+    assert result.detail["identity"]["fep.json"]["problem"] == "missing input"
+
+
+def test_validate_undeclared_scenario_input_fails_closed(tmp_path):
+    # A manifest that pulls in an extra data file the golden never declared
+    # changes the scenario; the identity gate must reject it even though
+    # every declared file is byte-identical.
+    import json
+    import shutil
+
+    from simval.oracle import validate
+
+    src = Path(__file__).parent.parent / "examples" / "fep" / "synthetic"
+    run = tmp_path / "synthetic"
+    shutil.copytree(src, run)
+    (run / "extra.csv").write_text("0.0\n")
+    manifest = json.loads((run / "fep.json").read_text())
+    manifest["files"] = manifest["files"] + ["extra.csv"]
+    (run / "fep.json").write_text(json.dumps(manifest))
+    result = validate(run, "fep_synthetic")
+    assert result.passed is False
+    assert result.detail["identity"]["__undeclared_inputs__"]["problem"] == ["extra.csv"]

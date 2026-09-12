@@ -200,4 +200,26 @@ half-fixes are corrected this time.
 | ONT-009 | P0 | ontos.py, ontos_eng.py, orchestrate.py | Life-mode contract checked event identity/counts but not placement — untimed initialization events accepted at any frame boundary | Fixed — life_contract_problems (shared by the engine adapter and the CLI) attributes every RegionLevel record to the boundary tick it precedes and requires requested events to precede TickHeader 1; any later-boundary occurrence is a contract violation. Moving a scheduled demote to a later boundary fails the ontos_run_contract check |
 | PAR-001 | P0 | diagnostics/params.py, context.py | NaN passed the `value <= 0` positivity checks (params.json JSON accepts the NaN literal) | Fixed — every spec-covered quantity is checked for finiteness BEFORE dimensional/range checks, with a clear violation; NaN/+inf/-inf on dt or ref_t fails the params diagnostic and the verdict |
 | PIPE-002 | P0 | pipeline.py, tests/test_manifest.py (REGRESSION from PIPE-001) | `_guarded()` treated ANY ImportError as a successful omission and the locking test enshrined it | Fixed — the only skip is a pre-declared absent optional dependency, probed via find_spec BEFORE the check runs (`_OPTIONAL_CHECK_DEPS` allowlist); once an applicable check is invoked, ANY exception — ImportError included — is a failing error result. Locking test rewritten to the new contract; monkeypatch-ImportError test added; the two PIPE-001 error tests now declare the capability present (deliberate test update) |
+| ORA-003 | P0 | oracle/cases.py, oracle/validate.py, all references | Golden `source_hash`/scenario identity was unenforced — validation keyed off conservation metrics alone, so a different scenario with matching metrics passed | Fixed — golden schema gains a required `identity` map {input name: sha256}; a golden without identity (or malformed hashes) fails closed at load. validate() computes the candidate's scenario identity (engine-aware canonical inputs; cheap file selection + hashing, no heavy deps) and requires exact equality — missing input, content mismatch, or undeclared scenario input fails before any metric is computed; an undetectable run-dir (defining config deleted) also fails closed. All 14 shipped goldens now carry identity computed from their fixtures |
+
+Golden/reference files touched in batch 2, and why:
+
+- `references/benzene_hydration_fep.json` — RETIRED (FEP-001); the
+  alchemtest fixture's real MBAR overlap (7.4e-4 / 1.4e-8) contradicts the
+  >= 0.05 invariant.
+- `references/lysozyme_openmm.json` — `energy_relative_range` removed
+  (IO-002: the committed energy.xvg carries only a `Potential` column —
+  no positional fallback, so the metric is not computable from this
+  fixture) and metrics regenerated from the committed fixture under
+  ORA-003 (identity pins the input bytes; the previous values came from
+  an older MDAnalysis DCD reader).
+- `references/h2_rhf.json` — `converged: 1.0` (exact) added (PYS-001).
+- `references/fep_synthetic.json` — overlap tolerance re-encoded as
+  `["min", 0.05]` (FEP-001).
+- all 14 references — `identity` block added (ORA-003): config/data-file
+  sha256s from each case's fixture (`adk_morph` from the MDAnalysisTests
+  datafiles; `lysozyme_nvt_30ps` from the canonical conf.gro/traj.xtc/
+  energy.xvg of pipeline/runs/lysozyme — note that raw dir also carries
+  duplicate nvt.xtc/nvt.tpr copies, so validate() on it correctly fails
+  IO-001 ambiguity; validate against a copy with the duplicates removed).
 

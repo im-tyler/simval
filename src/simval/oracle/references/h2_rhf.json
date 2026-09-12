@@ -2,6 +2,9 @@
   "description": "H2 at 0.74 Angstrom, RHF/sto3g. Reference: PySCF SCF converges, total energy ~-1.1167 Hartree.",
   "engine": "qc-pyscf",
   "force_field": "n/a",
+  "identity": {
+    "molecule.json": "ec64e945ed08e2955699a39fcb21b06f9234002f605dd3ebca474284c4acc86d"
+  },
   "name": "h2_rhf",
   "reference_metrics": {
     "converged": 1.0,

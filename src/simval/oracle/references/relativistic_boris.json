@@ -2,6 +2,9 @@
   "description": "Boris pusher",
   "engine": "relativistic-boris",
   "force_field": "n/a",
+  "identity": {
+    "relativistic.json": "60ac30e29b4af13484ce1f35df9043f648c68e391ece48740331843bd1474e19"
+  },
   "name": "relativistic_boris",
   "reference_metrics": {
     "gamma_drift": 3.9720546451956327e-16,

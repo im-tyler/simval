@@ -2,6 +2,9 @@
   "description": "Two-body Kepler orbit (G=1, M=1, m=1e-3, a=1, circular). Reference: REBOUND IAS15. Oracle checks conservation invariants (abs tolerances).",
   "engine": "nbody-rebound",
   "force_field": "n/a",
+  "identity": {
+    "system.json": "f70de41601dd36f2ec4c77f350045b021d07ef4b3f43c44263af36317b163275"
+  },
   "name": "kepler_two_body",
   "reference_metrics": {
     "angular_momentum_relative_range": 4.341145498627612e-16,

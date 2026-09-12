@@ -2,6 +2,9 @@
   "description": "2D TMz Maxwell FDTD, Courant-stable, radiating pulse.",
   "engine": "em-fdtd",
   "force_field": "n/a",
+  "identity": {
+    "em.json": "70e5a024394e1288bc93c5397fdfb98c7a2a343e308302dedb52996794fc7921"
+  },
   "name": "em_pulse_stable",
   "reference_metrics": {
     "courant": 0.7071067811865475,

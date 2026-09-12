@@ -2,6 +2,9 @@
   "description": "1D scalar wave, leapfrog FDTD, CFL=0.5 (stable). Reference: bounded energy (growth ~1.0). Oracle checks CFL + energy growth (abs tolerances).",
   "engine": "wave-fdtd",
   "force_field": "n/a",
+  "identity": {
+    "wave.json": "801fbecc4fca705e62035892a0448dd40fb65f0b56f00ceb866eae6a6c0ec81e"
+  },
   "name": "wave_pulse_stable",
   "reference_metrics": {
     "cfl": 0.5,

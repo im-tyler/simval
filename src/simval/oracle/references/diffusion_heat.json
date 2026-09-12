@@ -2,6 +2,9 @@
   "description": "1D heat diffusion, Fourier=0.25 (stable), insulated BCs",
   "engine": "heat-diffusion",
   "force_field": "n/a",
+  "identity": {
+    "diffusion.json": "ccc184170adfd3f51250ef83914bc22f5e484b8bbb68d43cbbf25a2fc7df93ef"
+  },
   "name": "diffusion_heat",
   "reference_metrics": {
     "energy_drift": 0.011151037373083742,

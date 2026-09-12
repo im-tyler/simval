@@ -11,6 +11,28 @@ _REFERENCES_DIR = Path(__file__).parent / "references"
 # must not silently flow into verdicts.
 SUPPORTED_REFERENCE_SERIES = (0, 1)
 
+_SHA256_RE = __import__("re").compile(r"^[0-9a-f]{64}$")
+
+
+def _check_identity(name: str, identity) -> dict[str, str]:
+    """Scenario identity (audit ORA-003): a required, non-empty map of
+    run-relative input path -> sha256(hex). A golden without identity is
+    malformed and fails closed at load time."""
+    if not isinstance(identity, dict) or not identity:
+        raise ValueError(
+            f"reference case {name!r}: golden carries no scenario 'identity' "
+            "(required: {input path: sha256} for every scenario-defining input)"
+        )
+    bad_types = sorted(k for k, v in identity.items() if not isinstance(k, str) or not isinstance(v, str))
+    if bad_types:
+        raise ValueError(f"reference case {name!r}: identity keys/values must be strings: {bad_types}")
+    bad_hashes = sorted(k for k, v in identity.items() if not _SHA256_RE.match(v))
+    if bad_hashes:
+        raise ValueError(
+            f"reference case {name!r}: identity entries must be lowercase sha256 hex: {bad_hashes}"
+        )
+    return dict(identity)
+
 
 def _check_reference_version(name: str, version) -> str:
     if not isinstance(version, str) or not version:
@@ -40,6 +62,7 @@ class ReferenceCase:
     source_hash: str
     reference_version: str = ""
     ignore: list[str] = field(default_factory=list)
+    identity: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -54,6 +77,7 @@ class ReferenceCase:
             "source_hash": self.source_hash,
             "reference_version": self.reference_version,
             "ignore": list(self.ignore),
+            "identity": dict(self.identity),
         }
 
 
@@ -80,6 +104,7 @@ def _load(path: Path) -> ReferenceCase:
         source_hash=d.get("source_hash", ""),
         reference_version=_check_reference_version(name, d.get("reference_version")),
         ignore=ignore,
+        identity=_check_identity(name, d.get("identity")),
     )
 
 

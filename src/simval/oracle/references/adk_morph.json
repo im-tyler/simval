@@ -2,6 +2,10 @@
   "description": "Adenylate kinase conformational-morph trajectory (MDAnalysisTests). Real recorded structure; reference for atom-count/Rg/RMSD-profile invariants.",
   "engine": "gromacs",
   "force_field": "oplsaa",
+  "identity": {
+    "conf.gro": "6c73737e2231da4f55ebb35ddca073af59f7f7e04cd8211857a1f94ba31f9c43",
+    "traj.xtc": "64684e9b45de961920d38e42ecddd191a38965a41273e52a8c5936dd9e211d1e"
+  },
   "name": "adk_morph",
   "reference_metrics": {
     "final_rg_nm": 2.0080413818359375,

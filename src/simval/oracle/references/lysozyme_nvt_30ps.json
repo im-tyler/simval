@@ -2,6 +2,11 @@
   "description": "Hen lysozyme (1AKI), amber99sb-ildn + TIP3P, neutralized (36 NA, 44 CL, 150 mM), em + 30ps NVT. Reference uses conserved energy.",
   "engine": "gromacs",
   "force_field": "amber99sb-ildn",
+  "identity": {
+    "conf.gro": "501301c14e8fac79925e98f9f7e59b35dc9c1d4adaa85c129262f0eba75020fd",
+    "energy.xvg": "0470e45079a4dba26c6d79b8cccf4f4ec5de60a125a9e74d1755eaf478c347e3",
+    "traj.xtc": "d5e7594a1f0b8eb4db14160e41377a77030f4391dd4f27d9cffded73deb776c0"
+  },
   "name": "lysozyme_nvt_30ps",
   "reference_metrics": {
     "energy_relative_range": 0.0005422236337083512,
