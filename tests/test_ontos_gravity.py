@@ -1522,3 +1522,62 @@ def test_snapshot_population_compared_against_body_count(tmp_path):
     summary = verify_stream_gravity(p, 42)
     assert summary["mismatch_count"] > 0
     assert any(m["field"] == "snapshot_population" for m in summary["mismatches"])
+
+
+# --- ONT-006: externally-supplied floats must be finite; checks fail closed ---
+
+
+def _params_stream(tmp_path, restitution, friction, walls=0):
+    """Stream whose ContactParams payload is surgically overwritten (the
+    replay itself cannot run with non-finite params — that is the point)."""
+    path = tmp_path / "p.stream"
+    _emit_gravity_stream(path, 11, 8, [], 4, contacts=True, params=(0.5, 0.25, walls))
+    data = bytearray(path.read_bytes())
+    off = _nth_offset(bytes(data), 12, 0)
+    struct.pack_into("<dd", data, off + 1, restitution, friction)
+    path.write_bytes(bytes(data))
+    return path
+
+
+@pytest.mark.parametrize(
+    "restitution,friction",
+    [
+        (float("nan"), 0.25),
+        (float("inf"), 0.25),
+        (float("-inf"), 0.25),
+        (0.5, float("nan")),
+        (0.5, float("inf")),
+        (0.5, float("-inf")),
+    ],
+)
+def test_nonfinite_contact_params_rejected_by_stream_verifier(tmp_path, restitution, friction):
+    p = _params_stream(tmp_path, restitution, friction)
+    summary = verify_stream_gravity(p, 11)
+    assert summary["mismatch_count"] > 0
+    assert any(m["field"] == "contact_params" for m in summary["mismatches"])
+    assert not check_reference_match_gravity(summary).passed
+
+
+def test_valid_contact_params_still_verify(tmp_path):
+    p = _params_stream(tmp_path, 0.5, 0.25)
+    summary = verify_stream_gravity(p, 11)
+    assert summary["mismatch_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("restitution", float("nan")),
+        ("restitution", float("inf")),
+        ("restitution", float("-inf")),
+        ("friction", float("nan")),
+        ("friction", float("inf")),
+        ("friction", float("-inf")),
+    ],
+)
+def test_nonfinite_grid_floats_rejected_by_normalizer(field, bad):
+    from simval.orchestrate import normalize_spec
+
+    spec = {"name": "x", "contacts": True, field: bad}
+    with pytest.raises(ValueError, match=field):
+        normalize_spec(spec)

@@ -1707,12 +1707,22 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
                         "actual": record,
                     }
                 )
-            if not (0.0 <= restitution <= 1.0) or friction < 0.0 or walls > 1:
+            # Fail-closed: NaN comparisons are all False, so finiteness is
+            # required explicitly and range checks are written positively.
+            # A NaN friction used to pass the old `friction < 0.0` check.
+            bad_params = not (
+                math.isfinite(restitution)
+                and math.isfinite(friction)
+                and 0.0 <= restitution <= 1.0
+                and friction >= 0.0
+                and walls <= 1
+            )
+            if bad_params:
                 mismatches.append(
                     {
                         "tick": last_tick,
                         "field": "contact_params",
-                        "expected": "restitution in [0,1], friction >= 0, walls in {0,1}",
+                        "expected": "finite restitution in [0,1], finite friction >= 0, walls in {0,1}",
                         "actual": record,
                     }
                 )

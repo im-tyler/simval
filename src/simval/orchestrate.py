@@ -102,6 +102,8 @@ def load_grid(path) -> list[dict]:
 
 def normalize_spec(spec: dict, index: int = 0) -> dict:
     """Fill defaults and validate one grid entry."""
+    import math
+
     name = spec.get("name") or f"run-{index}"
     mode = spec.get("mode", "gravity")
     if mode not in ("gravity", "life"):
@@ -116,6 +118,7 @@ def normalize_spec(spec: dict, index: int = 0) -> dict:
         "observer": None,
         "contacts": False,
         "radial": False,
+        "shells": False,
         "restitution": None,
         "friction": None,
         "walls": False,
@@ -123,19 +126,22 @@ def normalize_spec(spec: dict, index: int = 0) -> dict:
     if mode == "gravity":
         out["contacts"] = bool(spec.get("contacts", False))
         out["radial"] = bool(spec.get("radial", False))
+        out["shells"] = bool(spec.get("shells", False))
         out["walls"] = bool(spec.get("walls", False))
         if out["walls"]:
             out["contacts"] = True
+        if out["radial"] and out["shells"]:
+            raise ValueError(f"{name}: radial and shells are exclusive")
         if spec.get("restitution") is not None:
             e = float(spec["restitution"])
-            if not 0.0 <= e <= 1.0:
-                raise ValueError(f"{name}: restitution must be in [0,1], got {e}")
+            if not (math.isfinite(e) and 0.0 <= e <= 1.0):
+                raise ValueError(f"{name}: restitution must be finite in [0,1], got {e}")
             out["restitution"] = e
             out["contacts"] = True
         if spec.get("friction") is not None:
             fr = float(spec["friction"])
-            if fr < 0.0:
-                raise ValueError(f"{name}: friction must be >= 0, got {fr}")
+            if not (math.isfinite(fr) and fr >= 0.0):
+                raise ValueError(f"{name}: friction must be finite and >= 0, got {fr}")
             out["friction"] = fr
             out["contacts"] = True
     if mode == "gravity" and spec.get("observer") is not None:
@@ -185,6 +191,8 @@ def _cli_args(spec: dict, stream_path: Path) -> list[str]:
             args += ["--contacts"]
         if spec["radial"]:
             args += ["--radial"]
+        if spec["shells"]:
+            args += ["--shells"]
         if spec["restitution"] is not None:
             args += ["--restitution", str(spec["restitution"])]
         if spec["friction"] is not None:
