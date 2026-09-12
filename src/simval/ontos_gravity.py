@@ -1329,7 +1329,10 @@ def expected_zoom_policy(seed: int, offset: int, ticks: int, cli_events=None):
             if modes[region] == 0 and d > 48.0:
                 modes[region] = 1
                 events.append((t, region, 0))
-            elif modes[region] != 0 and d < 24.0:
+            elif modes[region] == 1 and d < 24.0:
+                # Promotion gates on Coarse only (audit ONT-010): a
+                # Collapsed region is left alone — the zoom policy never
+                # expands a monopole.
                 modes[region] = 0
                 events.append((t, region, 1))
     return events

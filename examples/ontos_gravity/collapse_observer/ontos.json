@@ -10,7 +10,7 @@
     ]
   ],
   "mode": "gravity",
-  "multipole": false,
+  "multipole": true,
   "observer": 42,
   "radial": false,
   "seed": 13,

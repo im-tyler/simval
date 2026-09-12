@@ -541,11 +541,12 @@ def test_multipole_recorded_stream_verifies():
 
 def test_legacy_section19_examples_still_verify():
     # Streams whose collapses carry no RegionMultipole record reconstruct
-    # per section 19; the committed pre-section-20 examples must verify
-    # bit-exactly.
-    for name, seed in (("collapse", 11), ("collapse_observer", 13)):
+    # per section 19; the committed pre-section-20 example must verify
+    # bit-exactly. (collapse_observer was regenerated from corrected
+    # ontos for ONT-010 and now carries the section 20 record.)
+    for name, seed in (("collapse", 11),):
         summary = verify_stream_gravity(EXAMPLES / name / "ontos.stream", seed)
-        assert summary["mismatch_count"] == 0, summary["mismatches"]
+        assert summary["mismatch_count"] == 0
         assert summary["multipole_events"] == 0
         assert check_multipole_match(summary).passed
 
@@ -1846,6 +1847,18 @@ def test_observer_clean_run_event_multiset_matches(tmp_path):
         cli = [(int(t), ry * 2 + rx, int(lv)) for t, rx, ry, lv in meta.get("events", [])]
         result = check_zoom_policy(records, seed, offset, cli_events=cli)
         assert result.passed, (name, result.detail)
+
+
+def test_zoom_policy_never_promotes_collapsed_region():
+    # ONT-010: seed 13 / observer 42 / collapse-at 40 0 0 — the focus
+    # enters region 0's promote band at tick 49 while region 0 carries a
+    # CLI collapse. The policy gates promotion on Coarse only; the old
+    # `modes[region] != 0` arm promoted the Collapsed region.
+    from simval.ontos_gravity import expected_zoom_policy
+
+    events = expected_zoom_policy(13, 42, 300, cli_events=[(40, 0, 2)])
+    assert (49, 0, 1) not in events
+    assert not any(t == 49 and r == 0 and lv == 1 for t, r, lv in events)
 
 
 def test_contract_observer_without_ticks_rejected():
