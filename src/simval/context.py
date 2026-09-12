@@ -154,10 +154,19 @@ class GromacsEngine(EngineAdapter):
 
         ctx.tpr_path = select_run_topology(run)
         if ctx.tpr_path is not None:
-            ctx.system_atom_types = io.load_atom_types(ctx.tpr_path, selection=selection) or None
-            if ctx.system_atom_types:
-                ctx.run_params["n_system_atom_types"] = len(set(ctx.system_atom_types))
-                ctx.consumed_inputs.append(ctx.tpr_path)
+            try:
+                types = io.load_atom_types(ctx.tpr_path, selection=selection)
+            except Exception as e:
+                # An unexpected topology parse failure must surface as a
+                # failing ff_coverage diagnostic when the check is
+                # applicable, never silently disable it (audit FF-001).
+                # (A typed not-available returns [] instead of raising.)
+                ctx.extra["ff_load_error"] = f"{type(e).__name__}: {e}"[:200]
+            else:
+                ctx.system_atom_types = types or None
+                if ctx.system_atom_types:
+                    ctx.run_params["n_system_atom_types"] = len(set(ctx.system_atom_types))
+                    ctx.consumed_inputs.append(ctx.tpr_path)
 
         ff_p = run / "ff_atom_types.txt"
         if ff_p.exists():

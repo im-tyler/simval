@@ -26,15 +26,22 @@ def load_trajectory(xtc, top, *, selection: str = "protein"):
 
 def load_atom_types(top, *, selection: str = "protein") -> list[str]:
     """Force-field atom types from a topology that carries them (e.g. .tpr).
-    Returns [] if the topology can't be parsed (e.g. tpx version skew)."""
-    try:
-        import MDAnalysis as mda
 
+    Returns [] only for the typed not-available case: a .tpr this MDAnalysis
+    build explicitly refuses (version skew — its TPR readers signal that with
+    an IOError naming the tpr). Any other parse failure propagates instead of
+    silently disabling ff_coverage (audit FF-001)."""
+    import MDAnalysis as mda
+
+    try:
         u = mda.Universe(str(top))
         grp = u.select_atoms(selection) if selection else u.atoms
         return list(grp.types)
-    except Exception:
-        return []
+    except IOError as e:
+        msg = str(e)
+        if "tpr" in msg.lower() or "gromacs" in msg.lower():
+            return []
+        raise
 
 
 def load_atom_names(top, *, selection: str | None = None) -> list[str]:

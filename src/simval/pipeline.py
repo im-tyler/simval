@@ -111,6 +111,11 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
 
     if ctx.system_atom_types is not None and ctx.ff_param_types is not None:
         results.append(ff_coverage.check_ff_coverage(ctx.system_atom_types, ctx.ff_param_types))
+    elif ctx.extra.get("ff_load_error") and ctx.ff_param_types is not None:
+        # The system-side atom types failed to load while the check is
+        # applicable (an ff list is present): a failing error, not silence
+        # (audit FF-001).
+        results.append(_error_result("ff_coverage", RuntimeError(ctx.extra["ff_load_error"])))
 
     if ctx.structure_path is not None:
         _guarded(
