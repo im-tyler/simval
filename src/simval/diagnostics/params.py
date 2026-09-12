@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from simval.result import DiagnosticResult
 from simval.units import Dimension, Quantity
 
@@ -27,12 +29,19 @@ def check_params(
         if name not in spec:
             continue
         checked += 1
+        value = float(q.value)
+        # Finiteness first, before any comparison: NaN fails every
+        # `<= 0` / `>= 0` test silently, and JSON parses the NaN/Infinity
+        # literals (audit PAR-001).
+        if not math.isfinite(value):
+            violations.append(f"{name}: value {value} must be finite")
+            continue
         if q.dimension != spec[name]:
             violations.append(
                 f"{name}: unit {q.unit!r} has dimension incompatible with expected"
             )
-        if name in MUST_BE_POSITIVE and q.value <= 0:
-            violations.append(f"{name}: value {q.value} must be positive")
+        if name in MUST_BE_POSITIVE and value <= 0:
+            violations.append(f"{name}: value {value} must be positive")
     n_violations = len(violations)
     return DiagnosticResult(
         name="params",
