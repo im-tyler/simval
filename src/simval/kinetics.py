@@ -74,6 +74,7 @@ class KineticsEngine(EngineAdapter):
         cfg = json.loads((run / "kinetics.json").read_text())
         data = integrate_kinetics(cfg)
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "kinetics.json")
         ctx.extra = {"history": data["history"], "species": data["species"]}
         ctx.run_params = {"engine": self.name, "domain": "chemical-kinetics",
                           "n_species": len(data["species"]), "n_steps": data["n_steps"]}

@@ -88,6 +88,7 @@ class EMEngine(EngineAdapter):
         cfg = json.loads((run / "em.json").read_text())
         data = integrate_em(cfg)
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "em.json")
         ctx.extra = {
             "em_energy": data["energy"], "courant": data["courant"],
             "field": data["field"], "src_on_index": int(data["src_on"] // 10),

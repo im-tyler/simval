@@ -153,3 +153,15 @@ def test_nonfinite_overlap_fails_closed():
         candidate["overlap_min_eigenvalue"] = bad
         compared = compare_metrics(candidate, case.reference_metrics, case.tolerances)
         assert compared["overlap_min_eigenvalue"]["passed"] is False
+
+
+# --- PROV-001: the fep engine registers its consumed inputs ---
+
+
+def test_fep_engine_registers_manifest_and_data_files(tmp_path):
+    import shutil
+
+    run = tmp_path / "synthetic"
+    shutil.copytree(EXAMPLE, run)
+    ctx = FepEngine().load_context(run, selection="n/a")
+    assert {p.name for p in ctx.consumed_inputs} == {"fep.json", "dhdl.csv"}

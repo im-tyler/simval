@@ -100,6 +100,7 @@ class FluidEngine(EngineAdapter):
         cfg = json.loads((run / "fluid.json").read_text())
         data = integrate_fluid(cfg)
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "fluid.json")
         ctx.extra = {
             "mass": data["mass"],
             "tau": data["tau"],

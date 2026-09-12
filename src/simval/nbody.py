@@ -93,6 +93,7 @@ class ReboundEngine(EngineAdapter):
     def load_context(self, run: Path, selection: str) -> RunContext:
         data = integrate_system(run / "system.json")
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "system.json")
         ctx.energy = data["energy"]
         ctx.extra = {
             "L_magnitude": data["L_magnitude"],

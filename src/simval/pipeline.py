@@ -216,18 +216,15 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
 
 def _artifact_files(ctx: RunContext) -> list[str]:
     """Canonical (sorted) artifact list: every input the engine actually
-    consumed when one is tracked, else the legacy glob fallback (audit
-    IO-001)."""
-    if ctx.consumed_inputs:
-        return sorted({str(p) for p in ctx.consumed_inputs})
-    run = ctx.run_dir
-    out = []
-    for pat in ("*.xtc", "*.gro", "*.pdb", "*.tpr", "*.xvg", "*.mdp",
-                "mdout.mdp", "*.top", "*.npy", "params.json"):
-        hit = next(run.glob(pat), None)
-        if hit:
-            out.append(str(hit))
-    return sorted(out)
+    consumed. An engine that registers nothing breaks the provenance
+    contract — that is an error, not a fallback to globbing (audits
+    IO-001/PROV-001)."""
+    if not ctx.consumed_inputs:
+        raise ValueError(
+            f"engine {ctx.engine!r} registered no consumed inputs: every engine "
+            "adapter must record the input files it consumed (audit PROV-001)"
+        )
+    return sorted({str(p) for p in ctx.consumed_inputs})
 
 
 def diagnose(run_dir, *, out: str = "provenance.json", selection: str = "protein",

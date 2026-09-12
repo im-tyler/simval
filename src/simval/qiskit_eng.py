@@ -116,6 +116,7 @@ class QiskitEngine(EngineAdapter):
         cfg = json.loads((run / "circuit.json").read_text())
         data = run_circuit(cfg)
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "circuit.json")
         ctx.extra = {
             "statevector": data["statevector"],
             "probabilities": data["probabilities"],

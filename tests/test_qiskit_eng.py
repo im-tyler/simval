@@ -99,3 +99,18 @@ def test_load_context_works_after_copy_to_tmp(tmp_path):
     ctx = QiskitEngine().load_context(run, selection="n/a")
     assert check_norm_conservation(ctx.extra["statevector"]).passed
     assert ctx.extra["probabilities"]["11"] == pytest.approx(0.5)
+
+
+# --- PROV-001: the qiskit engine registers its consumed inputs ---
+
+
+def test_qiskit_engine_registers_circuit_json(tmp_path):
+    import shutil
+
+    from simval.context import select_engine
+
+    src = Path(__file__).parent.parent / "examples" / "qc" / "bell"
+    run = tmp_path / "bell"
+    shutil.copytree(src, run)
+    ctx = select_engine(run).load_context(run, selection="n/a")
+    assert {p.name for p in ctx.consumed_inputs} == {"circuit.json"}

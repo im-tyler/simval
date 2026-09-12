@@ -63,6 +63,7 @@ class RelativisticEngine(EngineAdapter):
         cfg = json.loads((run / "relativistic.json").read_text())
         data = integrate_relativistic(cfg)
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "relativistic.json")
         ctx.extra = {"gamma": data["gamma"]}
         ctx.run_params = {"engine": self.name, "domain": "relativistic-dynamics",
                           "n_steps": data["n_steps"], "final_gamma": data["final_gamma"]}

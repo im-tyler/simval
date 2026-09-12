@@ -72,6 +72,7 @@ class DiffusionEngine(EngineAdapter):
         cfg = json.loads((run / "diffusion.json").read_text())
         data = integrate_diffusion(cfg)
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "diffusion.json")
         ctx.extra = {"fourier": data["fourier"], "heat_energy": data["energy"],
                      "field": data["field"]}
         ctx.run_params = {"engine": self.name, "domain": "heat-transfer",

@@ -72,6 +72,7 @@ class QuantumEngine(EngineAdapter):
         cfg = json.loads((run / "quantum.json").read_text())
         data = evolve_spin(cfg)
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "quantum.json")
         ctx.extra = {"norm": data["norm"], "p_up": data["p_up"]}
         ctx.run_params = {"engine": self.name, "domain": "quantum",
                           "omega0": data["omega0"], "omega1": data["omega1"], "n_steps": data["n_steps"]}

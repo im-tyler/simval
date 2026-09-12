@@ -128,6 +128,7 @@ class PyscfEngine(EngineAdapter):
     def load_context(self, run: Path, selection: str) -> RunContext:
         data = run_scf(run / "molecule.json")
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "molecule.json")
         ctx.extra = {
             "scf_energies": data["scf_energies"],
             "final_energy": data["final_energy"],

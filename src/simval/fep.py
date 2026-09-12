@@ -225,6 +225,7 @@ class FepEngine(EngineAdapter):
         manifest_path = run / "fep.json"
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text())
+            ctx.consumed_inputs.append(manifest_path)
         temperature = float(manifest.get("temperature", 298.15))
         kind = manifest.get("kind", "u_nk")
         fwd_files = manifest.get("files") or _discover(run, reverse=False)
@@ -237,6 +238,7 @@ class FepEngine(EngineAdapter):
                 p = run / name
                 if not p.exists():
                     continue
+                ctx.consumed_inputs.append(p)
                 frames.append(_load_reduced_potentials(p, kind, temperature))
             return _concat_sorted(frames)
 

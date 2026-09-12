@@ -433,3 +433,53 @@ def test_diagnose_passes_metadata_into_build_manifest(tmp_path, monkeypatch):
     # no post-hoc append happened (manifest carries no metadata key at all).
     assert captured["metadata"] is None
     assert "metadata" not in manifest
+
+
+# --- PROV-001: every engine registers its consumed inputs ---
+
+
+DOMAIN_EXAMPLES = [
+    ("wave.json", "wave"),
+    ("fluid.json", "fluid"),
+    ("em.json", "em"),
+    ("quantum.json", "quantum"),
+    ("diffusion.json", "diffusion"),
+    ("kinetics.json", "kinetics"),
+    ("relativistic.json", "relativistic"),
+]
+
+
+@pytest.mark.parametrize("config,domain", DOMAIN_EXAMPLES)
+def test_every_json_domain_registers_and_hashes_its_config(tmp_path, config, domain):
+    import json
+    import shutil
+
+    from simval.manifest import verify_manifest, write_manifest
+    from simval.pipeline import diagnose
+
+    src = Path(__file__).parent.parent / "examples" / domain
+    fixture = next(p for p in src.iterdir() if p.is_dir())
+    run = tmp_path / domain
+    shutil.copytree(fixture, run)
+    manifest = diagnose(run)
+    assert str(run / config) in manifest["files"], manifest["files"].keys()
+
+    out = tmp_path / "prov.json"
+    write_manifest(manifest, out)
+    assert verify_manifest(out)["ok"] is True
+
+    cfg = json.loads((run / config).read_text())
+    key = next(iter(cfg))
+    cfg[key] = cfg[key] * 2 if isinstance(cfg[key], (int, float)) else "mutated"
+    (run / config).write_text(json.dumps(cfg))
+    tampered = verify_manifest(out)
+    assert tampered["ok"] is False
+    assert str(run / config) in tampered["tampered"]
+
+
+def test_engine_with_no_consumed_inputs_is_a_contract_error():
+    from simval.pipeline import _artifact_files
+
+    ctx = _ctx()
+    with pytest.raises(ValueError, match="no consumed inputs"):
+        _artifact_files(ctx)

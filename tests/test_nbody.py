@@ -55,3 +55,18 @@ def test_oracle_kepler_flags_bad_candidate():
     result = compare_metrics(bad, case.reference_metrics, case.tolerances)
     assert result["__passed__"] is False
     assert result["energy_relative_range"]["passed"] is False
+
+
+# --- PROV-001: the n-body engine registers its consumed inputs ---
+
+
+def test_nbody_engine_registers_system_json(tmp_path):
+    import shutil
+
+    from simval.context import select_engine
+
+    src = Path(__file__).parent.parent / "examples" / "nbody" / "two_body"
+    run = tmp_path / "two_body"
+    shutil.copytree(src, run)
+    ctx = select_engine(run).load_context(run, selection="n/a")
+    assert str(run / "system.json") in {str(p) for p in ctx.consumed_inputs}

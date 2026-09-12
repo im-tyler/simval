@@ -74,3 +74,15 @@ def test_h2_reference_case_exists_and_matches_fresh_run():
     # PYS-001: the golden requires the solver's convergence flag (exact).
     assert case.reference_metrics["converged"] == 1.0
     assert data["converged"] is True
+
+
+# --- PROV-001: the pyscf engine registers its consumed inputs ---
+
+
+def test_pyscf_engine_registers_molecule_json(tmp_path):
+    import shutil
+
+    run = tmp_path / "h2"
+    shutil.copytree(EXAMPLE, run)
+    ctx = PyscfEngine().load_context(run, selection="n/a")
+    assert {p.name for p in ctx.consumed_inputs} == {"molecule.json"}

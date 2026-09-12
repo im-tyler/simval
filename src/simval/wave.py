@@ -101,6 +101,7 @@ class WaveEngine(EngineAdapter):
         cfg = json.loads((run / "wave.json").read_text())
         data = integrate_wave(cfg)
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "wave.json")
         ctx.extra = {
             "wave_energy": data["energy"],
             "cfl": data["cfl"],
