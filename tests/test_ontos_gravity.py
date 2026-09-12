@@ -389,6 +389,43 @@ def test_same_tick_expand_recollapse_invalidates_monopole_touching():
     assert recs[0]["jn"] > 0.0
 
 
+# --- ONT-015: wall overlap holds the touching key without an impulse ---
+
+
+def test_wall_touching_holds_receding_penetration_without_record():
+    # Three phases: (1) penetrating + inbound emits exactly one Contact;
+    # (2) penetrating + outbound keeps the wall key in the touching set,
+    # no record; (3) inbound again before separating applies the impulse
+    # with NO second record — the pair never left the touching set, so
+    # re-approach is not a contact beginning.
+    w = GravityWorld(3, 1)
+    w.contacts = True
+    w.contact_params = True
+    w.walls = True
+    w.restitution = 0.5
+    w.friction = 0.0
+    w.bodies[0]["x"] = -1.0
+    w.bodies[0]["y"] = 50.0
+    w.bodies[0]["vx"] = -0.5
+    w.bodies[0]["vy"] = 0.0
+    w.step()
+    assert len(w.last_contacts) == 1, "phase 1: one contact record"
+    assert w.last_contacts[0]["b"] == WALL_BASE
+    assert w.last_contacts[0]["jn"] > 0.0
+    assert w.bodies[0]["vx"] > 0.0, "bounced outbound"
+    assert (0, WALL_BASE) in w.touching
+    w.last_contacts.clear()
+    w.step()
+    assert not w.last_contacts, "phase 2: receding penetration emits nothing"
+    assert (0, WALL_BASE) in w.touching, "wall key stays in touching while overlapping"
+    w.last_contacts.clear()
+    w.bodies[0]["vx"] = -0.5
+    w.step()
+    assert not w.last_contacts, "phase 3: same contact, no second record"
+    assert w.bodies[0]["vx"] > 0.0, "the impulse still applies on re-approach"
+    assert (0, WALL_BASE) in w.touching
+
+
 # --- Section 19: collapse and reconstruction ---
 
 

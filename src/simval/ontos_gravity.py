@@ -1078,36 +1078,45 @@ class GravityWorld:
                 if frozen[i]:
                     continue
                 for wall in range(4):
+                    # Section 24 (audit ONT-015): overlap and approach are
+                    # separate tests. Touching contains every overlapping
+                    # pair, walls included, so a penetrating-but-receding
+                    # body keeps its key (the contact has not ended); the
+                    # impulse applies only while approaching.
                     if wall == 0:
-                        if not (self.bodies[i]["x"] - radii[i] < 0.0 and self.bodies[i]["vx"] < 0.0):
-                            continue
+                        overlap = self.bodies[i]["x"] - radii[i] < 0.0
+                        approaching = self.bodies[i]["vx"] < 0.0
                         nx = 0.0 - 1.0
                         ny = 0.0
                         cx = (self.bodies[i]["x"] + 0.0) * 0.5
                         cy = self.bodies[i]["y"]
                     elif wall == 1:
-                        if not (self.bodies[i]["x"] + radii[i] > 128.0 and self.bodies[i]["vx"] > 0.0):
-                            continue
+                        overlap = self.bodies[i]["x"] + radii[i] > 128.0
+                        approaching = self.bodies[i]["vx"] > 0.0
                         nx = 1.0
                         ny = 0.0
                         cx = (self.bodies[i]["x"] + 128.0) * 0.5
                         cy = self.bodies[i]["y"]
                     elif wall == 2:
-                        if not (self.bodies[i]["y"] - radii[i] < 0.0 and self.bodies[i]["vy"] < 0.0):
-                            continue
+                        overlap = self.bodies[i]["y"] - radii[i] < 0.0
+                        approaching = self.bodies[i]["vy"] < 0.0
                         nx = 0.0
                         ny = 0.0 - 1.0
                         cx = self.bodies[i]["x"]
                         cy = (self.bodies[i]["y"] + 0.0) * 0.5
                     else:
-                        if not (self.bodies[i]["y"] + radii[i] > 128.0 and self.bodies[i]["vy"] > 0.0):
-                            continue
+                        overlap = self.bodies[i]["y"] + radii[i] > 128.0
+                        approaching = self.bodies[i]["vy"] > 0.0
                         nx = 0.0
                         ny = 1.0
                         cx = self.bodies[i]["x"]
                         cy = (self.bodies[i]["y"] + 128.0) * 0.5
+                    if not overlap:
+                        continue
                     pair = (i, WALL_BASE + wall)
                     nxt.add(pair)
+                    if not approaching:
+                        continue
                     vrx = 0.0 - self.bodies[i]["vx"]
                     vry = 0.0 - self.bodies[i]["vy"]
                     vn = vrx * nx + vry * ny
