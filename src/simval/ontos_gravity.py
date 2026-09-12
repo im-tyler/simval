@@ -1425,7 +1425,32 @@ def check_rebound_anchor(records, seed: int, body_count: int, *, ticks: int = No
     )
 
 
+_V2_REGION_ORDER = ((0, 0), (1, 0), (0, 1), (1, 1))
+
+
+def _check_region_xy(tag: int, rx: int, ry: int, offset: int) -> None:
+    if rx not in (0, 1) or ry not in (0, 1):
+        raise ValueError(
+            f"noncanonical region coordinates ({rx},{ry}) in record tag {tag} at offset {offset}: "
+            "rx and ry must each be 0 or 1"
+        )
+
+
 def parse_stream_v2(path):
+    """Strict version-2 parser (spec section 16 emission contract).
+
+    Grammar: ContactParams only before the first TickHeader; at each tick
+    boundary RegionLevel records first, then RegionCollapsed groups
+    (each optionally followed by RegionMultipole and then RegionRadial or
+    RegionShells), then Contact records; then exactly TickHeader,
+    Snapshot, TotalsState, RegionState for regions (0,0), (1,0), (0,1),
+    (1,1) in that order, then BodyState for bodies 0..N-1 in id order.
+    Every timestamped record must repeat its frame's tick; pre-tick
+    records must carry the tick of the TickHeader they precede.
+    Duplicates, omissions, records outside an open frame, non-monotonic
+    ticks, dangling boundary records at EOF, and a zero-record stream are
+    all parse errors.
+    """
     data = Path(path).read_bytes()
     if len(data) < 20 or data[:4] != MAGIC:
         raise ValueError("not an ontos stream: bad magic")
@@ -1433,67 +1458,193 @@ def parse_stream_v2(path):
     if version != 2:
         raise ValueError(f"not a gravity stream (version {version})")
     world_w, world_h, body_count = struct.unpack_from("<III", data, 8)
+    if body_count < 1:
+        raise ValueError(f"invalid body_count {body_count} in stream header")
     records = []
     offset = 20
-    while offset < len(data):
+    n = len(data)
+    # state: boundary family ("boundary", "collapse", "collapse-mp",
+    # "contacts") or frame family ("snapshot", "totals", ("region", i),
+    # ("body", i)).
+    state = "boundary"
+    last_tick = 0
+    pending_boundary = False
+    pending_pre_tick: list[tuple[str, int]] = []
+    while offset < n:
+        rec_off = offset
         tag = data[offset]
         offset += 1
         if tag == 1:
+            if state not in ("boundary", "collapse", "collapse-mp", "contacts"):
+                raise ValueError(
+                    f"TickHeader at offset {rec_off} inside an incomplete tick frame (tick {last_tick})"
+                )
             (tick,) = struct.unpack_from("<Q", data, offset)
             offset += 8
+            if tick != last_tick + 1:
+                raise ValueError(
+                    f"non-consecutive TickHeader tick {tick} at offset {rec_off}: expected {last_tick + 1}"
+                )
+            for kind, ptick in pending_pre_tick:
+                if ptick != tick:
+                    raise ValueError(
+                        f"{kind} tick {ptick} at boundary does not match the following TickHeader tick {tick}"
+                    )
+            pending_pre_tick.clear()
+            pending_boundary = False
+            last_tick = tick
+            state = "snapshot"
             records.append(("tick", tick))
         elif tag == 2:
+            if state != "snapshot":
+                raise ValueError(f"Snapshot outside an open tick frame at offset {rec_off}")
             (population,) = struct.unpack_from("<Q", data, offset)
             offset += 8
+            state = "totals"
             records.append(("snapshot", population))
         elif tag == 3:
-            tick, x, y = struct.unpack_from("<QII", data, offset)
-            offset += 16
-            records.append(("flip", tick, x, y))
+            raise ValueError(f"tag 3 (CellFlipped) is reserved and unused in version 2 (offset {rec_off})")
         elif tag == 4:
+            if state not in ("boundary",):
+                raise ValueError(f"RegionLevel after boundary physics records at offset {rec_off}")
             region_x, region_y, level = struct.unpack_from("<IIB", data, offset)
-            if level > 2:
-                raise ValueError(f"invalid region level {level} at offset {offset - 1}")
             offset += 9
+            _check_region_xy(4, region_x, region_y, rec_off)
+            if level > 2:
+                raise ValueError(f"invalid region level {level} at offset {rec_off}")
+            pending_boundary = True
             records.append(("level", region_x, region_y, level))
         elif tag == 5:
-            vals = struct.unpack_from("<QIIBQQ", data, offset)
+            if not (isinstance(state, tuple) and state[0] == "region"):
+                raise ValueError(f"RegionState outside an open tick frame at offset {rec_off}")
+            tick, rx, ry, level, population, rhash = struct.unpack_from("<QIIBQQ", data, offset)
             offset += 33
-            records.append(("state", *vals))
+            _check_region_xy(5, rx, ry, rec_off)
+            expected = _V2_REGION_ORDER[state[1]]
+            if (rx, ry) != expected:
+                raise ValueError(
+                    f"RegionState for region ({rx},{ry}) at offset {rec_off}: expected region "
+                    f"{expected} next (order/duplicate violation)"
+                )
+            if tick != last_tick:
+                raise ValueError(
+                    f"RegionState tick {tick} does not match the open frame tick {last_tick} at offset {rec_off}"
+                )
+            if level > 2:
+                raise ValueError(f"invalid region-state level {level} at offset {rec_off}")
+            nxt = state[1] + 1
+            state = ("region", nxt) if nxt < 4 else ("body", 0)
+            records.append(("state", tick, rx, ry, level, population, rhash))
         elif tag == 6:
-            vals = struct.unpack_from("<QIBBddddd", data, offset)
+            if not (isinstance(state, tuple) and state[0] == "body"):
+                raise ValueError(
+                    f"BodyState outside the body block of tick {last_tick} at offset {rec_off}"
+                )
+            tick, bid, region, level, x, y, vx, vy, mass = struct.unpack_from("<QIBBddddd", data, offset)
             offset += 54
-            records.append(("body", *vals))
+            if tick != last_tick:
+                raise ValueError(
+                    f"BodyState tick {tick} does not match the open frame tick {last_tick} at offset {rec_off}"
+                )
+            if bid != state[1]:
+                raise ValueError(
+                    f"BodyState id {bid} at offset {rec_off}: expected body {state[1]} next "
+                    "(id order/duplicate violation)"
+                )
+            if region > 3 and region != UNMANAGED:
+                raise ValueError(f"BodyState region {region} at offset {rec_off}: expected 0..3 or {UNMANAGED}")
+            if level > 2:
+                raise ValueError(f"BodyState level {level} at offset {rec_off}: expected 0..2")
+            nxt = state[1] + 1
+            state = ("body", nxt) if nxt < body_count else "boundary"
+            records.append(("body", tick, bid, region, level, x, y, vx, vy, mass))
         elif tag == 7:
+            if state != "totals":
+                raise ValueError(f"TotalsState outside an open tick frame at offset {rec_off}")
             vals = struct.unpack_from("<QQQdddd", data, offset)
             offset += 56
+            if vals[0] != last_tick:
+                raise ValueError(
+                    f"TotalsState tick {vals[0]} does not match the open frame tick {last_tick} at offset {rec_off}"
+                )
+            state = ("region", 0)
             records.append(("totals", *vals))
         elif tag == 8:
+            if state not in ("boundary", "collapse", "collapse-mp"):
+                raise ValueError(f"RegionCollapsed after Contact records at offset {rec_off}")
             vals = struct.unpack_from("<QIIQdddddd", data, offset)
             offset += 72
+            _check_region_xy(8, vals[1], vals[2], rec_off)
+            pending_boundary = True
+            pending_pre_tick.append(("RegionCollapsed", vals[0]))
+            state = "collapse"
             records.append(("collapsed", *vals))
         elif tag == 9:
+            if state != "collapse":
+                raise ValueError(
+                    f"RegionMultipole without a preceding RegionCollapsed at offset {rec_off}"
+                )
             vals = struct.unpack_from("<QIIddddd", data, offset)
             offset += 56
+            _check_region_xy(9, vals[1], vals[2], rec_off)
+            pending_pre_tick.append(("RegionMultipole", vals[0]))
+            state = "collapse-mp"
             records.append(("multipole", *vals))
         elif tag == 10:
+            if state not in ("boundary", "collapse", "collapse-mp", "contacts"):
+                raise ValueError(f"Contact outside a tick boundary at offset {rec_off}")
             vals = struct.unpack_from("<QIIddd", data, offset)
             offset += 40
+            body_a, body_b = vals[1], vals[2]
+            if body_a >= body_count:
+                raise ValueError(
+                    f"Contact body_a {body_a} at offset {rec_off}: expected a real body id < {body_count}"
+                )
+            if body_b >= body_count and body_b < MONOPOLE_BASE:
+                raise ValueError(
+                    f"Contact body_b {body_b} at offset {rec_off}: expected a real body id < {body_count} "
+                    f"or a pseudo id >= {MONOPOLE_BASE}"
+                )
+            pending_boundary = True
+            pending_pre_tick.append(("Contact", vals[0]))
+            state = "contacts"
             records.append(("contact", *vals))
-        elif tag == 11:
-            vals = struct.unpack_from("<QIId", data, offset)
-            offset += 24
-            records.append(("radial", *vals))
+        elif tag == 11 or tag == 13:
+            if state != "collapse-mp":
+                kind = "RegionRadial" if tag == 11 else "RegionShells"
+                raise ValueError(f"{kind} without a preceding RegionMultipole at offset {rec_off}")
+            if tag == 11:
+                vals = struct.unpack_from("<QIId", data, offset)
+                offset += 24
+            else:
+                vals = struct.unpack_from("<QIIddddd", data, offset)
+                offset += 56
+            _check_region_xy(tag, vals[1], vals[2], rec_off)
+            pending_pre_tick.append(("RegionRadial" if tag == 11 else "RegionShells", vals[0]))
+            state = "contacts"
+            records.append(("radial" if tag == 11 else "shells", *vals))
         elif tag == 12:
+            if state != "boundary" or last_tick != 0:
+                raise ValueError(
+                    f"ContactParams after the first TickHeader at offset {rec_off}: it must precede all ticks"
+                )
             vals = struct.unpack_from("<ddB", data, offset)
             offset += 17
+            if vals[2] > 1:
+                raise ValueError(f"ContactParams walls byte {vals[2]} at offset {rec_off}: expected 0 or 1")
+            pending_boundary = True
             records.append(("params", *vals))
-        elif tag == 13:
-            vals = struct.unpack_from("<QIIddddd", data, offset)
-            offset += 56
-            records.append(("shells", *vals))
         else:
-            raise ValueError(f"unknown record tag {tag} at offset {offset - 1}")
+            raise ValueError(f"unknown record tag {tag} at offset {rec_off}")
+    if state not in ("boundary", "collapse", "collapse-mp", "contacts"):
+        raise ValueError(f"stream ends inside an incomplete tick frame (state {state}, tick {last_tick})")
+    if pending_boundary or pending_pre_tick:
+        raise ValueError(
+            "dangling boundary record(s) at end of stream with no following TickHeader "
+            f"(pending ticks: {pending_pre_tick[:4]})"
+        )
+    if last_tick == 0:
+        raise ValueError("stream carries no tick frames")
     return (world_w, world_h, body_count), records
 
 

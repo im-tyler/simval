@@ -23,6 +23,7 @@ from simval.ontos_gravity import (
     check_reconstruction_error,
     check_reference_match_gravity,
     check_shell_shape,
+    parse_stream_v2,
     region_at,
     verify_stream_gravity,
 )
@@ -1233,8 +1234,10 @@ def test_contact_params_after_first_tick_rejected(tmp_path):
     data += record  # now after every tick
     moved = tmp_path / "moved.stream"
     moved.write_bytes(bytes(data))
-    summary = verify_stream_gravity(moved, 11)
-    assert summary["mismatch_count"] > 0
+    # The strict grammar rejects ContactParams after the first TickHeader
+    # (and the dangling record at EOF) outright.
+    with pytest.raises(ValueError, match="ContactParams"):
+        verify_stream_gravity(moved, 11)
 
 
 def test_engine_diagnose_walls_run(tmp_path):
@@ -1337,3 +1340,157 @@ def test_engine_diagnose_corpus_runs(tmp_path):
         assert "ontos_contact_resolution" in names
         assert "ontos_audio_match" in names
         assert all(r.passed for r in results if r.name.startswith("ontos_")), name
+
+
+# --- ONT-002/004/005: strict grammar, frame-tick equality, canonical encodings ---
+
+_RECORD_SIZES = {1: 9, 2: 9, 3: 17, 4: 10, 5: 34, 6: 55, 7: 57, 8: 73, 9: 57, 10: 41, 11: 25, 12: 18, 13: 57}
+
+
+def _record_offsets(data: bytes) -> list[tuple[int, int]]:
+    offs = []
+    off = 20
+    while off < len(data):
+        offs.append((data[off], off))
+        off += _RECORD_SIZES[data[off]]
+    assert off == len(data)
+    return offs
+
+
+def _nth_offset(data: bytes, tag: int, n: int = 0) -> int:
+    hits = [off for t, off in _record_offsets(data) if t == tag]
+    return hits[n]
+
+
+def _grammar_stream(tmp_path, name="g.stream", **kw):
+    path = tmp_path / name
+    _emit_gravity_stream(path, 42, 4, kw.pop("schedule", []), kw.pop("ticks", 6), **kw)
+    return path.read_bytes()
+
+
+def test_v2_header_only_rejected(tmp_path):
+    p = tmp_path / "h.stream"
+    p.write_bytes(b"ONTO" + struct.pack("<IIII", 2, 128, 128, 4))
+    with pytest.raises(ValueError, match="no tick frames"):
+        parse_stream_v2(p)
+
+
+def test_v2_tickheader_only_rejected(tmp_path):
+    data = _grammar_stream(tmp_path)
+    p = tmp_path / "t.stream"
+    p.write_bytes(data[:20] + b"\x01" + struct.pack("<Q", 1))
+    with pytest.raises(ValueError, match="incomplete tick frame"):
+        parse_stream_v2(p)
+
+
+def test_v2_drop_one_snapshot_rejected(tmp_path):
+    data = _grammar_stream(tmp_path)
+    off = _nth_offset(data, 2)
+    mutated = data[:off] + data[off + 9 :]
+    p = tmp_path / "m.stream"
+    p.write_bytes(mutated)
+    with pytest.raises(ValueError, match="TotalsState|incomplete|outside"):
+        parse_stream_v2(p)
+
+
+def test_v2_drop_one_body_rejected(tmp_path):
+    data = _grammar_stream(tmp_path)
+    off = _nth_offset(data, 6, 2)
+    mutated = data[:off] + data[off + 55 :]
+    p = tmp_path / "m.stream"
+    p.write_bytes(mutated)
+    with pytest.raises(ValueError, match="body|incomplete"):
+        parse_stream_v2(p)
+
+
+def test_v2_drop_tickheader_rejected(tmp_path):
+    data = _grammar_stream(tmp_path)
+    off = _nth_offset(data, 1, 1)
+    mutated = data[:off] + data[off + 9 :]
+    p = tmp_path / "m.stream"
+    p.write_bytes(mutated)
+    with pytest.raises(ValueError, match="outside an open tick frame"):
+        parse_stream_v2(p)
+
+
+def test_v2_duplicate_snapshot_rejected(tmp_path):
+    data = _grammar_stream(tmp_path)
+    off = _nth_offset(data, 2)
+    mutated = data[: off + 9] + data[off : off + 9] + data[off + 9 :]
+    p = tmp_path / "m.stream"
+    p.write_bytes(mutated)
+    with pytest.raises(ValueError):
+        parse_stream_v2(p)
+
+
+def test_v2_duplicate_whole_tick_frame_rejected(tmp_path):
+    data = bytearray(_grammar_stream(tmp_path))
+    start = _nth_offset(bytes(data), 1, 0)
+    frame = bytes(data[start:])
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data) + frame)
+    with pytest.raises(ValueError, match="non-consecutive"):
+        parse_stream_v2(p)
+
+
+def test_v2_append_after_last_tick_rejected(tmp_path):
+    data = _grammar_stream(tmp_path)
+    stray = b"\x05" + struct.pack("<QIIBQQ", 6, 0, 0, 1, 0, 0)
+    p = tmp_path / "m.stream"
+    p.write_bytes(data + stray)
+    with pytest.raises(ValueError, match="outside an open tick frame"):
+        parse_stream_v2(p)
+
+
+def test_v2_dangling_level_at_eof_rejected(tmp_path):
+    data = _grammar_stream(tmp_path)
+    p = tmp_path / "m.stream"
+    p.write_bytes(data + b"\x04" + struct.pack("<IIB", 0, 0, 0))
+    with pytest.raises(ValueError, match="dangling"):
+        parse_stream_v2(p)
+
+
+@pytest.mark.parametrize("tag,payload_start", [(7, 1), (5, 1), (6, 1)])
+def test_v2_frame_record_tick_mismatch_rejected(tmp_path, tag, payload_start):
+    # ONT-004: totals/state/body records must repeat the open TickHeader tick.
+    data = bytearray(_grammar_stream(tmp_path))
+    off = _nth_offset(bytes(data), tag, 0)
+    data[off + payload_start] += 1  # low byte of the record's u64 tick
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="does not match the open frame tick"):
+        parse_stream_v2(p)
+
+
+def test_v2_pre_tick_record_tick_mismatch_rejected(tmp_path):
+    # A RegionCollapsed tick must equal the TickHeader it precedes.
+    order, _ = _region_occupancy(42, 4, 3)
+    data = bytearray(_grammar_stream(tmp_path, schedule=[(4, order[0], 2)], ticks=8))
+    off = _nth_offset(bytes(data), 8, 0)
+    data[off + 1] -= 1
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="does not match the following TickHeader"):
+        parse_stream_v2(p)
+
+
+def test_v2_region_coord_rewrite_rejected(tmp_path):
+    # ONT-005: (0,1) rewritten as (2,0) must not alias region 2.
+    data = bytearray(_grammar_stream(tmp_path, schedule=[(2, 2, 0)], ticks=4))
+    off = _nth_offset(bytes(data), 4, 0)
+    struct.pack_into("<II", data, off + 1, 2, 0)
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="noncanonical region coordinates"):
+        parse_stream_v2(p)
+
+
+def test_v2_collapsed_region_coord_rewrite_rejected(tmp_path):
+    order, _ = _region_occupancy(42, 4, 3)
+    data = bytearray(_grammar_stream(tmp_path, schedule=[(4, order[0], 2)], ticks=8))
+    off = _nth_offset(bytes(data), 8, 0)
+    struct.pack_into("<II", data, off + 9, 0, 3)
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="noncanonical region coordinates"):
+        parse_stream_v2(p)

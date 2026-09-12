@@ -223,7 +223,27 @@ class StreamHeader:
     version: int
 
 
+_V1_REGION_ORDER = ((0, 0), (1, 0), (0, 1), (1, 1))
+
+
+def _check_region_xy(tag: int, rx: int, ry: int, offset: int) -> None:
+    if rx not in (0, 1) or ry not in (0, 1):
+        raise ValueError(
+            f"noncanonical region coordinates ({rx},{ry}) in record tag {tag} at offset {offset}: "
+            "rx and ry must each be 0 or 1"
+        )
+
+
 def parse_stream(path) -> tuple:
+    """Strict version-1 parser (spec section 9 emission contract).
+
+    Grammar: RegionLevel records only between tick frames (a dangling level
+    record at EOF is rejected); each frame is exactly TickHeader, Snapshot,
+    RegionState for regions (0,0), (1,0), (0,1), (1,1) in that order;
+    timestamped records must repeat the open frame's tick. Anything else —
+    duplicates, omissions, records outside an open frame, non-monotonic
+    ticks, a zero-record stream — is a parse error.
+    """
     data = Path(path).read_bytes()
     if len(data) < 16 or data[:4] != MAGIC:
         raise ValueError("not an ontos stream: bad magic")
@@ -232,31 +252,97 @@ def parse_stream(path) -> tuple:
         raise ValueError(f"unsupported ontos stream version {version}")
     records = []
     offset = 16
-    while offset < len(data):
+    n = len(data)
+    # state: "boundary" (between frames) | "snapshot" | ("region", i)
+    state = "boundary"
+    last_tick = 0
+    pending_boundary = False
+    while offset < n:
+        rec_off = offset
         tag = data[offset]
         offset += 1
         if tag == 1:
+            if state != "boundary":
+                raise ValueError(
+                    f"TickHeader at offset {rec_off} inside an incomplete tick frame (tick {last_tick})"
+                )
             (tick,) = struct.unpack_from("<Q", data, offset)
             offset += 8
+            if tick != last_tick + 1:
+                raise ValueError(
+                    f"non-consecutive TickHeader tick {tick} at offset {rec_off}: expected {last_tick + 1}"
+                )
+            last_tick = tick
+            pending_boundary = False
+            state = "snapshot"
             records.append(("tick", tick))
         elif tag == 2:
+            if state != "snapshot":
+                raise ValueError(f"Snapshot outside an open tick frame at offset {rec_off}")
             (population,) = struct.unpack_from("<Q", data, offset)
             offset += 8
+            state = ("region", 0)
             records.append(("snapshot", population))
         elif tag == 3:
+            if state == "boundary":
+                raise ValueError(f"CellFlipped outside an open tick frame at offset {rec_off}")
             tick, x, y = struct.unpack_from("<QII", data, offset)
             offset += 16
+            if tick != last_tick:
+                raise ValueError(
+                    f"CellFlipped tick {tick} does not match the open frame tick {last_tick} at offset {rec_off}"
+                )
+            if x >= world_w or y >= world_h:
+                raise ValueError(
+                    f"CellFlipped coordinates ({x},{y}) outside the {world_w}x{world_h} world at offset {rec_off}"
+                )
             records.append(("flip", tick, x, y))
         elif tag == 4:
+            if state != "boundary":
+                raise ValueError(f"RegionLevel inside a tick frame at offset {rec_off}")
             region_x, region_y, level = struct.unpack_from("<IIB", data, offset)
             offset += 9
+            _check_region_xy(4, region_x, region_y, rec_off)
+            if level not in (0, 1):
+                raise ValueError(
+                    f"invalid version-1 region level {level} at offset {rec_off}: expected 0 (coarse) or 1 (fine)"
+                )
+            pending_boundary = True
             records.append(("level", region_x, region_y, level))
         elif tag == 5:
-            tick, region_x, region_y, level, population, rhash = struct.unpack_from("<QIIBQQ", data, offset)
+            if not (isinstance(state, tuple) and state[0] == "region"):
+                raise ValueError(f"RegionState outside an open tick frame at offset {rec_off}")
+            tick, rx, ry, level, population, rhash = struct.unpack_from("<QIIBQQ", data, offset)
             offset += 33
-            records.append(("state", tick, region_x, region_y, level, population, rhash))
+            _check_region_xy(5, rx, ry, rec_off)
+            expected = _V1_REGION_ORDER[state[1]]
+            if (rx, ry) != expected:
+                raise ValueError(
+                    f"RegionState for region ({rx},{ry}) at offset {rec_off}: expected region "
+                    f"{expected} next (order/duplicate violation)"
+                )
+            if tick != last_tick:
+                raise ValueError(
+                    f"RegionState tick {tick} does not match the open frame tick {last_tick} at offset {rec_off}"
+                )
+            if level not in (0, 1):
+                raise ValueError(
+                    f"invalid version-1 region-state level {level} at offset {rec_off}: expected 0 or 1"
+                )
+            nxt = state[1] + 1
+            state = "boundary" if nxt == 4 else ("region", nxt)
+            records.append(("state", tick, rx, ry, level, population, rhash))
         else:
-            raise ValueError(f"unknown record tag {tag} at offset {offset - 1}")
+            raise ValueError(f"unknown record tag {tag} at offset {rec_off}")
+    if state != "boundary":
+        raise ValueError(
+            "stream ends inside an incomplete tick frame "
+            f"({state if not isinstance(state, tuple) else state[0] + ' ' + str(state[1])}, tick {last_tick})"
+        )
+    if pending_boundary:
+        raise ValueError("dangling RegionLevel record(s) at end of stream with no following TickHeader")
+    if last_tick == 0:
+        raise ValueError("stream carries no tick frames")
     return StreamHeader(world_w, world_h, version), records
 
 
@@ -320,15 +406,19 @@ def verify_stream(path, seed: int) -> dict:
 
 def check_reference_match(summary: dict, *, threshold: float = 0.0) -> DiagnosticResult:
     count = summary["mismatch_count"]
+    # Independent of mismatch_count: a stream that compared zero (or
+    # tick-free) records must never read as a pass.
+    insufficient = summary["records_compared"] < 1 or summary["ticks_verified"] < 1
     return DiagnosticResult(
         name="ontos_reference_match",
-        passed=count <= threshold,
+        passed=count <= threshold and not insufficient,
         threshold=float(threshold),
         value=float(count),
         detail={
             "ticks_verified": summary["ticks_verified"],
             "records_compared": summary["records_compared"],
             "first_mismatches": summary["mismatches"],
+            "insufficient_records": insufficient,
         },
     )
 

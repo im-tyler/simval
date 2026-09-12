@@ -163,3 +163,136 @@ def test_module_cli_verifies_and_rejects(tmp_path, capsys):
     corrupt.write_bytes(bytes(data))
     assert _main([str(corrupt), "42"]) == 1
     assert _main([str(tmp_path / "missing.stream"), "42"]) == 2
+
+
+# --- ONT-002/004/005: strict grammar, frame-tick equality, canonical encodings ---
+
+_V1_SIZES = {"tick": 9, "snapshot": 9, "flip": 17, "level": 10, "state": 34}
+
+
+def _v1_stream_bytes(tmp_path, name, schedule=(), ticks=4):
+    world = ReferenceWorld(seed=42)
+    world.seed_r_pentomino()
+    path = tmp_path / name
+    _emit_stream(path, world, list(schedule), ticks)
+    return path.read_bytes()
+
+
+def test_v1_header_only_rejected(tmp_path):
+    p = tmp_path / "h.stream"
+    p.write_bytes(b"ONTO" + struct.pack("<III", 1, 128, 128))
+    with pytest.raises(ValueError, match="no tick frames"):
+        parse_stream(p)
+
+
+def test_v1_tickheader_only_rejected(tmp_path):
+    data = _v1_stream_bytes(tmp_path, "base.stream")
+    p = tmp_path / "t.stream"
+    p.write_bytes(data[:16] + b"\x01" + struct.pack("<Q", 1))
+    with pytest.raises(ValueError, match="incomplete tick frame"):
+        parse_stream(p)
+
+
+def _v1_first_offset(data: bytes, kind: str) -> int:
+    path_like = data
+    off = 16
+    while off < len(path_like):
+        tag = path_like[off]
+        name = {1: "tick", 2: "snapshot", 3: "flip", 4: "level", 5: "state"}[tag]
+        if name == kind:
+            return off
+        off += _V1_SIZES[name]
+    raise AssertionError(f"no {kind} record found")
+
+
+def test_v1_drop_one_snapshot_rejected(tmp_path):
+    data = _v1_stream_bytes(tmp_path, "base.stream")
+    off = _v1_first_offset(data, "snapshot")
+    p = tmp_path / "m.stream"
+    p.write_bytes(data[:off] + data[off + 9 :])
+    with pytest.raises(ValueError):
+        parse_stream(p)
+
+
+def test_v1_drop_one_state_rejected(tmp_path):
+    data = _v1_stream_bytes(tmp_path, "base.stream")
+    off = _v1_first_offset(data, "state")
+    p = tmp_path / "m.stream"
+    p.write_bytes(data[:off] + data[off + 34 :])
+    with pytest.raises(ValueError):
+        parse_stream(p)
+
+
+def test_v1_duplicate_snapshot_rejected(tmp_path):
+    data = _v1_stream_bytes(tmp_path, "base.stream")
+    off = _v1_first_offset(data, "snapshot")
+    p = tmp_path / "m.stream"
+    p.write_bytes(data[: off + 9] + data[off : off + 9] + data[off + 9 :])
+    with pytest.raises(ValueError):
+        parse_stream(p)
+
+
+def test_v1_duplicate_tick_frame_rejected(tmp_path):
+    data = _v1_stream_bytes(tmp_path, "base.stream")
+    off = _v1_first_offset(data, "tick")
+    p = tmp_path / "m.stream"
+    p.write_bytes(data + data[off:])
+    with pytest.raises(ValueError, match="non-consecutive"):
+        parse_stream(p)
+
+
+def test_v1_append_after_last_tick_rejected(tmp_path):
+    data = _v1_stream_bytes(tmp_path, "base.stream")
+    stray = b"\x02" + struct.pack("<Q", 0)
+    p = tmp_path / "m.stream"
+    p.write_bytes(data + stray)
+    with pytest.raises(ValueError, match="outside an open tick frame"):
+        parse_stream(p)
+
+
+def test_v1_dangling_level_at_eof_rejected(tmp_path):
+    data = _v1_stream_bytes(tmp_path, "base.stream")
+    p = tmp_path / "m.stream"
+    p.write_bytes(data + b"\x04" + struct.pack("<IIB", 0, 0, 0))
+    with pytest.raises(ValueError, match="dangling"):
+        parse_stream(p)
+
+
+def test_v1_state_tick_mismatch_rejected(tmp_path):
+    # ONT-004: a RegionState tick off by one from the frame must fail.
+    data = bytearray(_v1_stream_bytes(tmp_path, "base.stream"))
+    off = _v1_first_offset(bytes(data), "state")
+    data[off + 1] += 1
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="does not match the open frame tick"):
+        parse_stream(p)
+
+
+def test_v1_level_two_aliases_coarse_rejected(tmp_path):
+    # ONT-005: level 2 in a version-1 stream must not be read as coarse 0.
+    data = bytearray(_v1_stream_bytes(tmp_path, "sched.stream", schedule=[(1, 0, 0)]))
+    data[16 + 1 + 4 + 4] = 2  # level byte of the first RegionLevel record
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="version-1 region level 2"):
+        parse_stream(p)
+
+
+def test_v1_region_coord_rewrite_rejected(tmp_path):
+    # ONT-005: (0,1) rewritten as (2,0) must not alias region 2.
+    data = bytearray(_v1_stream_bytes(tmp_path, "sched.stream", schedule=[(0, 1, 0)]))
+    struct.pack_into("<II", data, 16 + 1, 2, 0)
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="noncanonical region coordinates"):
+        parse_stream(p)
+
+
+def test_reference_match_fails_on_zero_compared_records():
+    from simval.ontos import check_reference_match
+
+    summary = {"mismatch_count": 0, "records_compared": 0, "ticks_verified": 0, "mismatches": []}
+    assert not check_reference_match(summary).passed
+    summary = {"mismatch_count": 0, "records_compared": 5, "ticks_verified": 1, "mismatches": []}
+    assert check_reference_match(summary).passed
