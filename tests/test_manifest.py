@@ -77,6 +77,7 @@ def test_errored_rmsf_check_fails_and_names_diagnostic(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("rmsf exploded")
 
+    monkeypatch.setitem(pipeline._OPTIONAL_CHECK_DEPS, "per_residue_rmsf", ("json",))
     monkeypatch.setattr(rmsf_mod, "check_rmsf", boom)
     import numpy as np
 
@@ -112,6 +113,10 @@ def test_errored_charge_state_and_hbonds_fail_manifest(monkeypatch, tmp_path):
     def boom(*a, **k):
         raise RuntimeError("diagnostic exploded")
 
+    # Capabilities declared present so the checks are applicable and the
+    # monkeypatched explosions become error results (PIPE-002 contract).
+    monkeypatch.setitem(pipeline._OPTIONAL_CHECK_DEPS, "charge_state", ("json",))
+    monkeypatch.setitem(pipeline._OPTIONAL_CHECK_DEPS, "hydrogen_bonds", ("json",))
     monkeypatch.setattr(prep_mod, "check_charge_state", boom)
     monkeypatch.setattr(hbonds_mod, "check_hydrogen_bonds", boom)
     ctx = _ctx(
@@ -125,22 +130,44 @@ def test_errored_charge_state_and_hbonds_fail_manifest(monkeypatch, tmp_path):
     assert build_manifest({}, results)["verdict"] == "fail"
 
 
-def test_optional_dependency_absence_is_explicit_skip(monkeypatch, tmp_path):
+def test_declared_capability_absence_skips_without_invoking(monkeypatch, tmp_path):
+    # PIPE-002: the only skip is a pre-declared absent optional dependency,
+    # probed BEFORE the check runs — the check itself must never execute.
     from simval import pipeline
     from simval.diagnostics import prep as prep_mod
 
-    def missing(*a, **k):
+    def must_not_run(*a, **k):
+        raise AssertionError("check invoked although its capability is absent")
+
+    monkeypatch.setitem(pipeline._OPTIONAL_CHECK_DEPS, "charge_state", ("simval_no_such_dep_xyz",))
+    monkeypatch.setattr(prep_mod, "check_charge_state", must_not_run)
+    ctx = _ctx(structure_path=tmp_path / "s.gro", tpr_path=tmp_path / "t.tpr")
+    results = pipeline.run_checks(ctx)
+    assert not any(r.name == "charge_state" for r in results)
+    assert "charge_state" in ctx.skipped
+    assert "not applicable" in ctx.skipped["charge_state"]
+
+
+def test_import_error_from_invoked_check_is_failing(monkeypatch, tmp_path):
+    # PIPE-002 (regression): an ImportError raised by an APPLICABLE check
+    # (capability present, lazy import broken inside the check) must be a
+    # failing error result, never a skip.
+    from simval import pipeline
+    from simval.diagnostics import prep as prep_mod
+
+    def broken_import(*a, **k):
         raise ImportError("No module named 'gmx'")
 
-    monkeypatch.setattr(prep_mod, "check_charge_state", missing)
-    ctx = _ctx(
-        structure_path=tmp_path / "s.gro",
-        tpr_path=tmp_path / "t.tpr",
-    )
+    monkeypatch.setitem(pipeline._OPTIONAL_CHECK_DEPS, "charge_state", ("json",))
+    monkeypatch.setattr(prep_mod, "check_charge_state", broken_import)
+    ctx = _ctx(structure_path=tmp_path / "s.gro", tpr_path=tmp_path / "t.tpr")
     results = pipeline.run_checks(ctx)
-    assert not any(r.name == "charge_state" and not r.passed for r in results)
-    assert "charge_state" in ctx.skipped
-    assert "optional dependency" in ctx.skipped["charge_state"]
+    errored = [r for r in results if r.name == "charge_state"]
+    assert errored and not errored[0].passed
+    assert errored[0].detail["status"] == "error"
+    assert "ImportError" in errored[0].detail["error"]
+    assert "charge_state" not in ctx.skipped
+    assert build_manifest({}, results)["verdict"] == "fail"
 
 
 # --- PYS-001: solver convergence is a mandatory, verdict-bearing check ---

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 from simval.context import RunContext, select_engine
@@ -35,14 +36,44 @@ def _error_result(name: str, exc: Exception):
     )
 
 
+# Pre-declared optional dependencies per guarded check. Probed BEFORE the
+# check runs: an absent dependency means the check is not applicable for
+# this install. This is the ONLY skip path — once an applicable check is
+# invoked, any exception (including ImportError from a lazy import inside
+# the check) is a failing error result (audits PIPE-001/PIPE-002).
+_OPTIONAL_CHECK_DEPS: dict[str, tuple[str, ...]] = {
+    "per_residue_rmsf": ("MDAnalysis",),
+    "box_cutoff": ("MDAnalysis",),
+    "steric_clashes": ("MDAnalysis",),
+    "charge_state": ("MDAnalysis",),
+    "hydrogen_bonds": ("MDAnalysis",),
+}
+
+
+def _missing_capability(name: str) -> str | None:
+    deps = _OPTIONAL_CHECK_DEPS.get(name)
+    if not deps:
+        return None
+    try:
+        for dep in deps:
+            if importlib.util.find_spec(dep) is None:
+                return dep
+    except Exception as e:  # a broken meta-path finder is an environment error
+        raise ValueError(f"capability probe for {name!r} failed: {e}") from e
+    return None
+
+
 def _guarded(ctx: RunContext, name: str, results: list, fn):
-    """Run one diagnostic. Optional-dependency absence (ImportError) is an
-    explicit skip; any other raise from an applicable check is a failing
-    error result that blocks the verdict (audit PIPE-001)."""
+    """Run one diagnostic. The only skip is a pre-declared optional
+    dependency that is absent, probed before invocation. Any raise from an
+    invoked, applicable check — ImportError included — is a failing error
+    result that blocks the verdict (audit PIPE-002)."""
+    missing = _missing_capability(name)
+    if missing is not None:
+        ctx.skipped[name] = f"not applicable: optional dependency {missing!r} unavailable"
+        return
     try:
         results.append(fn())
-    except (ImportError, ModuleNotFoundError) as e:
-        ctx.skipped[name] = f"optional dependency unavailable: {e}"[:160]
     except Exception as e:
         results.append(_error_result(name, e))
 
