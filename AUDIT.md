@@ -1,5 +1,10 @@
 # Omnilator — Audit v1 (5-pass synthesis)
 
+> **Register note (2026-09-11):** §A–E below are the historical planning audit
+> (pre-rename; kept verbatim). The verification-oracle audit register — the
+> authoritative record of oracle-hardening findings against HEAD 7495370 —
+> is §F at the bottom of this file.
+
 > Synthesis of five independent analysis passes: competitive positioning, technical architecture, risk/oversight hunt, Hive codebase audit, product/UX/scope.
 > Convergent findings (flagged by ≥2 passes) are high-confidence. The audit's own conclusion is in §D.
 
@@ -130,3 +135,49 @@ Doing another planning round is *not* on this list. The highest-quality next act
 - **C (risk):** §6 covers ~30% of the real surface — security, GPL, silent-wrong-physics, and the meta-risk of over-planning are all missing.
 - **D (Hive audit):** greenfield Python; Hive is TS/AI-SDK/code-tools, dormant 4.5 mo; steal 4 patterns, ignore `openclaw/`.
 - **E (product/UX):** engineering architecture wearing a product's clothes — no user named, and its three loudest choices (NL-first, chat UI, creative+science) each contradict its own reproducibility principle.
+
+---
+
+## F. Verification-oracle audit register (2026-09-11)
+
+Findings verified against HEAD `7495370` by an external review; implemented
+in the commits below. simval is the trust anchor — a false pass is the worst
+failure mode, so every fix errs toward failing closed.
+
+| ID | Severity | Area | Finding | Status |
+|---|---|---|---|---|
+| ORA-001 | P0 | oracle/validate.py | `compare_metrics` silently skipped reference metrics absent from the candidate or lacking a tolerance rule; `all_pass` stayed true for unexamined fields | Fixed — every reference metric is mandatory (missing-from-candidate = FAIL, missing-policy = hard config error); per-case `ignore` list (default empty); count/version-like metrics exact by default; corpus test proves every shipped metric resolves to exactly one rule |
+| ORA-002 | P0 | oracle + references | Physical ceilings encoded as abs-distance-from-golden (wave CFL 1.4 passed vs ref 0.5 tol 1.0) | Fixed — `max`/`min`/`interval` bound kinds with finiteness required; wave CFL max 1.0, EM Courant max 1.0, energy-growth ceilings as max, tau interval [0.5,2.0], fourier max 0.5, p_up_swing min 0.9 |
+| ONT-001 | P0 | ontos_gravity/orchestrate | Oracle derived body count, horizon, feature modes and events from the candidate stream; orchestrator did not persist radial/restitution/friction/walls | Fixed — immutable `GravityContract` from metadata validated before replay (body count, exact horizon, event schedule) and after (multipole/radial/shells record presence, contact params bit-exact); replay modes driven by the contract; every CLI-affecting field persisted to ontos.json; all 20 corpus examples carry full contract metadata |
+| ONT-002 | P0 | ontos.py, ontos_gravity.py | No strict grammar/cardinality/EOF finalization; a header-only v1 stream passed with zero mismatches | Fixed — strict per-version parser state machines (per-tick record order and cardinality, duplicate/omission rejection, no timestamped records outside an open frame, dangling boundary records at EOF rejected, non-consecutive ticks rejected); reference-match independently fails on zero compared records; mutation suite: header-only, TickHeader-only, drop-one, duplicate-one, duplicate-frame, append-after-last-tick |
+| ONT-003 | P0 | ontos_gravity.py | v2 Snapshot population parsed but only counted as compared | Fixed — compared against the stream header body count; single-bit flip in a corpus tag-2 payload produces nonzero mismatch_count |
+| ONT-004 | P0 | ontos.py, ontos_gravity.py | Totals/State/Body records never checked their tick against the active TickHeader | Fixed — every timestamped record must repeat its frame tick, including pre-tick records vs the TickHeader they precede; tick +/-1 mutations on Totals/State/Body/pre-tick records all rejected |
+| ONT-005 | P0 | ontos.py, ontos_gravity.py | Noncanonical encodings aliased (v1 level != 1 became coarse; region coords ry*2+rx unvalidated so (2,0) aliased (0,1)) | Fixed — v1 levels strictly {0,1}; v2 levels documented sets; rx/ry each validated in {0,1} on every region-carrying record; body ids strictly sequenced; body region/level bytes and contact pseudo-id ranges validated |
+| ONT-006 | P0 | orchestrate.py, ontos_gravity.py | Friction validated only as `friction < 0.0` so NaN passed | Fixed — all externally-supplied floats (grid spec + ContactParams in streams) require isfinite with positively-expressed range checks at both layers; NaN/+inf/-inf restitution and friction rejected |
+| GOLD-001 | P1 | oracle/cases.py | `reference_version` present in goldens but never parsed or gated | Fixed — parsed into ReferenceCase; 0.1.x series accepted; missing/unsupported fails closed before metric comparison (99.0.0 fixture rejected) |
+| AUDIO-001 | P1 | ontos_audio.py | Monopole contacts resolved against FINAL collapse mass, not the mass at contact time | Fixed — collapse-mass timeline captured in one stream-order pass at each Contact record (body masses immutable, resolve post-pass); falsifying recollapse test (mass 10 -> contact -> recollapse 20 -> contact); corpus WAVs unchanged (walls corpus carries identical recollapse masses); the ontos Rust CLI already computed mu at contact time |
+| PIPE-001 | P1 | context.py, pipeline.py, manifest.py | Applicable diagnostics raising Exception were silently skipped and absent from the all() verdict | Fixed — ImportError from known optional deps is an explicit skip; any other raise from an applicable check (charge_state, hydrogen_bonds, per_residue_rmsf, box_cutoff, steric_clashes) is a failing status=error DiagnosticResult that blocks the verdict; CA-load distinguishes not-applicable (ValueError) from errored |
+| ORCH-001 | P1 | orchestrate.py | Grid run names used as filesystem paths, recursively deleted if present | Fixed — names preflight-validated (no absolute/separators/../duplicates) before any filesystem mutation; run directories use internal `cell-<index>` ids with display names kept separate; sentinel-file and ../escape tests |
+| ORCH-002 | P1 | orchestrate.py | normalize_spec ran outside the per-cell try, aborting the whole grid | Fixed — normalization inside the failure boundary; errors attributed to cell index/name in an `_error` row; [valid, invalid, valid] yields 3 rows with the third executed |
+| ORCH-003 | P1 | orchestrate.py, cli.py | Empty grid loaded fine and `all([])` exited 0 | Fixed — load_grid rejects an empty list; CLI success requires bool(results) |
+| IO-001 | P1 | _util.py, validate.py, pipeline.py, context.py | Input selection used first glob match (filesystem-order dependent); provenance hashed one file per pattern | Fixed — semantic inputs require exactly one match (ambiguity = error); RunContext.consumed_inputs tracked by the synthetic/Gromacs/ontos engines; manifest hashes ALL consumed inputs, canonically sorted; mutating any consumed .npy fails verify-manifest |
+| DET-001 | P2 | manifest.py, orchestrate.py | Wall-clock timestamps/timings embedded in reports break byte-determinism | Fixed — canonical_digest over the payload with volatile keys (created_at, wall timings) recursively stripped; identical verifications produce identical digests; orchestrate --out carries the canonical digest alongside raw rows |
+
+Golden/reference files touched, and why:
+
+- `references/h2_rhf.json` — `final_energy` renamed to `final_energy_hartree`
+  (and its tolerance entry) to match the metric the oracle actually computes;
+  `_pyscf_metrics` now also reports `n_cycles`/`scf_last_delta`.
+- `references/wave_pulse_stable.json`, `em_pulse_stable.json` — ceilings
+  re-encoded as bounds (ORA-002), counts exact.
+- `references/fluid_flow_stable.json` — tau as interval [0.5, 2.0] mirroring
+  check_tau_stability; tau_in_range exact.
+- `references/quantum_spin.json` — p_up_swing as min 0.9 floor.
+- `references/diffusion_heat.json` — fourier as max 0.5 mirroring
+  check_fourier_stability.
+- `examples/ontos*/**/ontos.json` — all 20 corpus runs upgraded with full
+  run-contract metadata (mode, ticks, bodies, events, observer, contact
+  flags/params, multipole) derived from each stream's own records; the two
+  legacy pre-spec-20 examples (`collapse`, `collapse_observer`) marked
+  multipole=false. No stream or WAV bytes changed; every example still
+  verifies through the full engine path.
