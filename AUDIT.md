@@ -181,3 +181,18 @@ Golden/reference files touched, and why:
   legacy pre-spec-20 examples (`collapse`, `collapse_observer`) marked
   multipole=false. No stream or WAV bytes changed; every example still
   verifies through the full engine path.
+
+---
+
+## G. Verification-oracle audit register, batch 2 (2026-09-12)
+
+Findings verified against HEAD `0bdb2d3` by an external review; implemented
+in the commits below. Same posture as §F: simval is the trust anchor, every
+fix errs toward failing closed. Three findings (GROM-001, FEP-002,
+PIPE-002-residual) are regressions from the §F batch — the locking tests and
+half-fixes are corrected this time.
+
+| ID | Severity | Area | Finding | Status |
+|---|---|---|---|---|
+| FEP-001 | P0 | fep.py, oracle/validate.py, references | MBAR overlap compared as abs-distance from the golden (golden stored 0.0), so a zero-overlap candidate passed while check_overlap() declared it unreliable | Fixed — overlap is a `min` bound invariant (>= 0.05) mirroring check_overlap. `benzene_hydration_fep` RETIRED: the alchemtest fixture's actual MBAR overlap min-eigenvalues (Coulomb leg 7.4e-4, VDW leg 1.4e-8, pymbar 4.0.3) are far below the 0.05 invariant, so the golden as shipped contradicted the domain check; regeneration impossible, case removed (owner decision, documented here — not silently dropped). fep_synthetic remains the shipped FEP reference |
+

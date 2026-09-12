@@ -269,7 +269,8 @@ _DEFAULT_TOLERANCES = {
     "norm_drift": ("abs", 1e-9),
     "tv_distance": ("abs", 1e-9),
     "deltaG": ("abs", 2.0),
-    "overlap_min_eig": ("abs", 0.05),
+    "overlap_min_eig": ("min", 0.05),
+    "overlap_min_eigenvalue": ("min", 0.05),
     "final_energy_hartree": ("abs", 1e-6),
     "scf_last_delta": ("abs", 1e-6),
 }

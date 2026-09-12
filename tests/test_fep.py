@@ -93,6 +93,7 @@ def test_fep_engine_load_context_reads_csv_u_nk():
 
 def test_oracle_fep_case_exists_and_self_matches():
     assert "fep_synthetic" in list_cases()
+    assert "benzene_hydration_fep" not in list_cases()  # retired (FEP-001, see AUDIT.md)
     case = get_case("fep_synthetic")
     u = synthetic_u_nk()
     fe = check_free_energy(u)
@@ -116,3 +117,39 @@ def test_oracle_fep_flags_bad_candidate():
     assert compared["__passed__"] is False
     assert compared["deltaG_kT"]["passed"] is False
     assert compared["overlap_min_eigenvalue"]["passed"] is False
+
+
+# --- FEP-001: overlap is a min-bound invariant, not distance-from-golden ---
+
+
+def test_overlap_min_bound_rejects_zero_overlap():
+    # A zero-overlap candidate passed the old abs-0.05 rule against the
+    # benzene golden's stored 0.0; the min bound must fail it exactly like
+    # check_overlap() does.
+    case = get_case("fep_synthetic")
+    candidate = dict(case.reference_metrics)
+    candidate["overlap_min_eigenvalue"] = 0.0
+    compared = compare_metrics(candidate, case.reference_metrics, case.tolerances)
+    assert compared["overlap_min_eigenvalue"]["passed"] is False
+    assert compared["__passed__"] is False
+    # Consistency with the domain check: the same value is declared unreliable.
+    from simval.fep import _OVERLAP_MIN_EIGENVALUE
+
+    assert 0.0 < _OVERLAP_MIN_EIGENVALUE
+
+
+def test_overlap_min_bound_boundary_accepts_threshold():
+    case = get_case("fep_synthetic")
+    candidate = dict(case.reference_metrics)
+    candidate["overlap_min_eigenvalue"] = 0.05
+    compared = compare_metrics(candidate, case.reference_metrics, case.tolerances)
+    assert compared["overlap_min_eigenvalue"]["passed"] is True
+
+
+def test_nonfinite_overlap_fails_closed():
+    case = get_case("fep_synthetic")
+    for bad in (float("nan"), float("inf")):
+        candidate = dict(case.reference_metrics)
+        candidate["overlap_min_eigenvalue"] = bad
+        compared = compare_metrics(candidate, case.reference_metrics, case.tolerances)
+        assert compared["overlap_min_eigenvalue"]["passed"] is False
