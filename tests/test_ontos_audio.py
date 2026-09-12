@@ -4,6 +4,8 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
+import pytest
+
 from simval.ontos_audio import (
     AUDIO_SR,
     RING,
@@ -127,7 +129,7 @@ def test_coarsehit_example_wav_matches():
     assert digest == 0x11EADC8A83DF194E
 
 
-def test_monopole_mu_uses_collapse_mass():
+def test_monopole_mu_uses_collapse_mass_at_contact_time():
     from simval.ontos_gravity import MONOPOLE_BASE, parse_stream_v2
 
     _, records = parse_stream_v2(CONTACT_EXAMPLES / "walls" / "ontos.stream")
@@ -141,16 +143,63 @@ def test_monopole_mu_uses_collapse_mass():
         elif record[0] == "collapsed":
             collapse_mass[record[3] * 2 + record[2]] = record[5]
         elif record[0] == "contact":
-            contacts.append(record)
+            contacts.append((record, dict(collapse_mass)))
     want = []
-    for record in contacts:
+    for record, mass_at_contact in contacts:
         _, tick, a, b, jn, _cx, _cy = record
         ma = masses[a]
         if b >= MONOPOLE_BASE:
-            m = collapse_mass[b - MONOPOLE_BASE]
+            m = mass_at_contact[b - MONOPOLE_BASE]
             mu = (ma * m) / (ma + m)
         else:
             mu = (ma * masses[b]) / (ma + masses[b])
         want.append((tick, mu, jn))
-    assert any(r[3] >= MONOPOLE_BASE for r in contacts)
+    assert any(r[0][3] >= MONOPOLE_BASE for r in contacts)
     assert excitations == want
+
+
+def test_recollapse_mass_timeline_keyed_by_event_order():
+    # The falsifying case for the old two-pass bug: collapse mass 10 ->
+    # contact -> recollapse mass 20 -> contact. The first excitation
+    # must use 10 (mass at contact time), the second 20 — never the
+    # final map for both.
+    from simval.ontos_gravity import MONOPOLE_BASE
+
+    def body(tick, bid, mass):
+        return ("body", tick, bid, 0, 1, 1.0, 1.0, 0.0, 0.0, mass)
+
+    def collapsed(tick, region, mass):
+        return ("collapsed", tick, region % 2, region // 2, 3, mass, 1.0, 1.0, 0.0, 0.0, 0.0)
+
+    def contact(tick, b):
+        return ("contact", tick, 0, b, 0.5, 1.0, 1.0)
+
+    mono = MONOPOLE_BASE + 2
+    records = [
+        body(1, 0, 2.0),
+        collapsed(1, 2, 10.0),
+        contact(2, mono),
+        collapsed(3, 2, 20.0),
+        contact(4, mono),
+        ("tick", 4),
+    ]
+    excitations, final_tick = collect_excitations(records)
+    assert final_tick == 4
+    assert len(excitations) == 2
+    mu_first = (2.0 * 10.0) / (2.0 + 10.0)
+    mu_second = (2.0 * 20.0) / (2.0 + 20.0)
+    assert excitations[0] == (2, mu_first, 0.5)
+    assert excitations[1] == (4, mu_second, 0.5)
+    assert struct.pack("<d", excitations[0][1]) != struct.pack("<d", excitations[1][1])
+
+
+def test_monopole_contact_without_collapse_record_rejected():
+    from simval.ontos_gravity import MONOPOLE_BASE
+
+    records = [
+        ("body", 1, 0, 0, 1, 1.0, 1.0, 0.0, 0.0, 2.0),
+        ("contact", 2, 0, MONOPOLE_BASE + 1, 0.5, 1.0, 1.0),
+        ("tick", 2),
+    ]
+    with pytest.raises(ValueError, match="no preceding RegionCollapsed"):
+        collect_excitations(records)

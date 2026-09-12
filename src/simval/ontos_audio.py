@@ -35,11 +35,16 @@ def collect_excitations(records):
     use the reduced mass of the two bodies; wall pseudo ids (>=
     0xFFFFFF00) are infinitely massive (mu = m_a); collapsed-region
     monopole pseudo ids (>= 0xFF000000) use the reduced mass against
-    the region's RegionCollapsed mass.
+    the region's RegionCollapsed mass **at contact time** — captured in
+    one stream-order pass, so a recollapse that changes the region mass
+    does not retroactively rewrite earlier excitations. Body masses are
+    immutable per body and a tick's Contact records precede that tick's
+    BodyState block, so those resolve after the pass; only the collapse
+    mass timeline is event-order-sensitive.
     """
     masses = {}
     collapse_mass = {}
-    contacts = []
+    pending = []  # (tick, body_a, body_b, jn, mono_mass_at_contact_or_None)
     last_tick = 0
     for record in records:
         kind = record[0]
@@ -51,17 +56,27 @@ def collect_excitations(records):
             collapse_mass[ry * 2 + rx] = mass
         elif kind == "contact":
             _, tick, body_a, body_b, jn, _cx, _cy = record
-            contacts.append((tick, body_a, body_b, jn))
+            if body_b >= 0xFFFFFF00:
+                pending.append((tick, body_a, body_b, jn, None))
+            elif body_b >= 0xFF000000:
+                region = body_b - 0xFF000000
+                if region not in collapse_mass:
+                    raise ValueError(
+                        f"monopole contact at tick {tick} references region {region} "
+                        "with no preceding RegionCollapsed record"
+                    )
+                pending.append((tick, body_a, body_b, jn, collapse_mass[region]))
+            else:
+                pending.append((tick, body_a, body_b, jn, None))
         elif kind == "tick":
             last_tick = record[1]
     excitations = []
-    for tick, body_a, body_b, jn in contacts:
+    for tick, body_a, body_b, jn, mono_m in pending:
         ma = masses[body_a]
         if body_b >= 0xFFFFFF00:
             mu = ma
-        elif body_b >= 0xFF000000:
-            m = collapse_mass[body_b - 0xFF000000]
-            mu = (ma * m) / (ma + m)
+        elif mono_m is not None:
+            mu = (ma * mono_m) / (ma + mono_m)
         else:
             mu = (ma * masses[body_b]) / (ma + masses[body_b])
         excitations.append((tick, mu, jn))
