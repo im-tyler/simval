@@ -2021,7 +2021,17 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
                     else:
                         multipole_deltas.append((exp["tick"], exp["region"], dipole, quad, energy_delta))
         elif kind == "snapshot":
+            _, population = record
             compared += 1
+            if population != body_count:
+                mismatches.append(
+                    {
+                        "tick": last_tick,
+                        "field": "snapshot_population",
+                        "expected": body_count,
+                        "actual": population,
+                    }
+                )
         elif kind == "totals":
             _, tick, fine, coarse_n, mass, px, py, energy = record
             compared += 1

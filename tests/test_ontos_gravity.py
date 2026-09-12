@@ -1494,3 +1494,31 @@ def test_v2_collapsed_region_coord_rewrite_rejected(tmp_path):
     p.write_bytes(bytes(data))
     with pytest.raises(ValueError, match="noncanonical region coordinates"):
         parse_stream_v2(p)
+
+
+# --- ONT-003: Snapshot population must be compared, not just counted ---
+
+
+def test_snapshot_payload_bitflip_produces_mismatch(tmp_path):
+    corpus = CONTACT_EXAMPLES / "contact" / "ontos.stream"
+    data = bytearray(corpus.read_bytes())
+    off = _nth_offset(bytes(data), 2, 0)
+    data[off + 1] ^= 0x02  # single bit in the Snapshot population payload
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data))
+    summary = verify_stream_gravity(p, 11)
+    assert summary["mismatch_count"] > 0
+    assert not check_reference_match_gravity(summary).passed
+
+
+def test_snapshot_population_compared_against_body_count(tmp_path):
+    path = tmp_path / "s.stream"
+    _emit_gravity_stream(path, 42, 4, [], 5)
+    data = bytearray(path.read_bytes())
+    off = _nth_offset(bytes(data), 2, 0)
+    struct.pack_into("<Q", data, off + 1, 3)  # wrong population
+    p = tmp_path / "m.stream"
+    p.write_bytes(bytes(data))
+    summary = verify_stream_gravity(p, 42)
+    assert summary["mismatch_count"] > 0
+    assert any(m["field"] == "snapshot_population" for m in summary["mismatches"])
