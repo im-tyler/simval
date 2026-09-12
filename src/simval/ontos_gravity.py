@@ -1206,9 +1206,7 @@ class GravityWorld:
                     return False
                 if a < n and left_fine[a]:
                     return False
-                if b < MONOPOLE_BASE and b < n and left_fine[b]:
-                    return False
-                return True
+                return not (b < MONOPOLE_BASE and b < n and left_fine[b])
 
             self.touching = {pair for pair in self.touching if _pair_kept(pair)}
 
