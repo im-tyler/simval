@@ -434,6 +434,56 @@ def check_tick_monotonicity(summary: dict) -> DiagnosticResult:
     )
 
 
+def life_contract_problems(meta: dict, summary: dict, records: list) -> list[str]:
+    """Validate a life run's ontos.json metadata against the stream.
+
+    Shared by the engine adapter and the standalone CLI so both paths
+    enforce the same run contract (audit ONT-007/009).
+    """
+    problems = []
+    meta_ticks = meta.get("ticks")
+    if meta_ticks is not None and int(meta_ticks) != summary["ticks_verified"]:
+        problems.append(
+            f"ontos.json ticks={meta_ticks} but stream verified {summary['ticks_verified']} ticks"
+        )
+    if "events" in meta:
+        from collections import Counter
+
+        want = Counter()
+        for ev in meta["events"]:
+            if len(ev) != 3 or ev[0] not in _LIFE_EVENT_KINDS:
+                problems.append(f"ontos.json life events must be [kind, rx, ry], got {list(ev)}")
+                continue
+            kind, rx, ry = ev[0], int(ev[1]), int(ev[2])
+            if rx not in (0, 1) or ry not in (0, 1):
+                problems.append(f"ontos.json life event region ({rx},{ry}) outside the 2x2 grid")
+                continue
+            want[(rx, ry, _LIFE_EVENT_KINDS[kind])] += 1
+        got = Counter((r[1], r[2], r[3]) for r in records if r[0] == "level")
+        for key in sorted((want - got).elements()):
+            problems.append(f"missing scheduled event {key}")
+        for key in sorted((got - want).elements()):
+            problems.append(f"unscheduled event {key} in stream")
+    return problems
+
+
+_LIFE_EVENT_KINDS = {"demote": 0, "promote": 1}
+
+
+def check_life_contract(meta: dict, summary: dict, records: list) -> "DiagnosticResult | None":
+    """Engine-adapter wrapper: a failed life run contract as a DiagnosticResult."""
+    problems = life_contract_problems(meta, summary, records)
+    if not problems:
+        return None
+    return DiagnosticResult(
+        name="ontos_run_contract",
+        passed=False,
+        threshold=0.0,
+        value=float(len(problems)),
+        detail={"problems": problems[:10]},
+    )
+
+
 def _main(argv=None) -> int:
     from simval.ontos_gravity import _main as gravity_aware_main
 

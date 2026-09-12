@@ -1725,3 +1725,52 @@ def test_engine_contract_metadata_tamper_fails_checks(tmp_path):
     results = run_checks(ctx)
     ref = next(r for r in results if r.name == "ontos_reference_match")
     assert not ref.passed
+
+
+# --- ONT-007: standalone CLI requires the expected-run contract ---
+
+
+def test_module_cli_gravity_contract_from_metadata(tmp_path, capsys):
+    from simval.ontos_gravity import _main
+
+    run = EXAMPLES / "window"
+    rc = _main(
+        [str(run / "ontos.stream"), "42", "--metadata", str(run / "ontos.json")]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "OK" in out and "[NO CONTRACT]" not in out
+
+
+def test_module_cli_gravity_bare_stream_rejected(tmp_path, capsys):
+    from simval.ontos_gravity import _main
+
+    run = EXAMPLES / "window"
+    rc = _main([str(run / "ontos.stream"), "42"])
+    assert rc == 2
+    assert "no expected-run contract" in capsys.readouterr().err
+
+
+def test_module_cli_gravity_explicit_flags_contract(tmp_path, capsys):
+    from simval.ontos_gravity import _main
+
+    run = EXAMPLES / "window"
+    rc = _main(
+        [str(run / "ontos.stream"), "42", "--mode", "gravity", "--ticks", "120",
+         "--bodies", "8", "--demote-at", "20", "0", "0", "--promote-at", "80", "0", "0"]
+    )
+    assert rc == 0
+    assert "[NO CONTRACT]" not in capsys.readouterr().out
+
+
+def test_module_cli_gravity_contract_flags_catch_horizon_lie(tmp_path, capsys):
+    from simval.ontos_gravity import _main
+
+    run = EXAMPLES / "window"
+    rc = _main(
+        [str(run / "ontos.stream"), "42", "--mode", "gravity", "--ticks", "90",
+         "--bodies", "8"]
+    )
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "contract_ticks" in out

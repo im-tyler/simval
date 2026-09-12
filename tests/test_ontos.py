@@ -155,15 +155,84 @@ def test_randomized_schedules_self_consistent(tmp_path):
 def test_module_cli_verifies_and_rejects(tmp_path, capsys):
     from simval.ontos import _main
 
-    assert _main([str(R_PENTOMINO / "ontos.stream"), "42"]) == 0
+    meta = str(R_PENTOMINO / "ontos.json")
+    assert _main([str(R_PENTOMINO / "ontos.stream"), "42", "--metadata", meta]) == 0
     out = capsys.readouterr().out
     assert "OK" in out and "mismatches=0" in out
     data = bytearray((R_PENTOMINO / "ontos.stream").read_bytes())
     data[-1] ^= 0xFF
     corrupt = tmp_path / "corrupt.stream"
     corrupt.write_bytes(bytes(data))
-    assert _main([str(corrupt), "42"]) == 1
-    assert _main([str(tmp_path / "missing.stream"), "42"]) == 2
+    assert _main([str(corrupt), "42", "--metadata", meta]) == 1
+    assert _main([str(tmp_path / "missing.stream"), "42", "--metadata", meta]) == 2
+
+
+# --- ONT-007: the standalone CLI requires the expected-run contract ---
+
+
+def test_module_cli_rejects_bare_stream_without_contract(tmp_path, capsys):
+    from simval.ontos import _main
+
+    rc = _main([str(R_PENTOMINO / "ontos.stream"), "42"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "no expected-run contract" in err
+
+
+def test_module_cli_no_contract_flag_warns_loudly(tmp_path, capsys):
+    from simval.ontos import _main
+
+    rc = _main([str(R_PENTOMINO / "ontos.stream"), "42", "--no-contract"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "WARNING" in captured.err and "NOT validated" in captured.err
+    assert "[NO CONTRACT]" in captured.out
+
+
+def test_module_cli_explicit_flags_build_life_contract(tmp_path, capsys):
+    from simval.ontos import _main
+
+    rc = _main(
+        [str(R_PENTOMINO / "ontos.stream"), "42", "--mode", "life", "--ticks", "64",
+         "--demote", "1", "0", "--demote", "0", "1"]
+    )
+    assert rc == 0
+    assert "[NO CONTRACT]" not in capsys.readouterr().out
+
+
+def test_module_cli_contract_flags_detect_wrong_schedule(tmp_path, capsys):
+    from simval.ontos import _main
+
+    rc = _main(
+        [str(R_PENTOMINO / "ontos.stream"), "42", "--mode", "life", "--ticks", "64",
+         "--promote", "0", "0"]
+    )
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "CONTRACT" in out
+
+
+def test_module_cli_metadata_tamper_fails(tmp_path, capsys):
+    from simval.ontos import _main
+
+    meta = json.loads((R_PENTOMINO / "ontos.json").read_text())
+    meta["ticks"] = 50  # claims a shorter horizon than the stream carries
+    meta_path = tmp_path / "ontos.json"
+    meta_path.write_text(json.dumps(meta))
+    rc = _main([str(R_PENTOMINO / "ontos.stream"), "42", "--metadata", str(meta_path)])
+    assert rc == 1
+    assert "ticks=50" in capsys.readouterr().out
+
+
+def test_module_cli_rejects_metadata_plus_flags(tmp_path, capsys):
+    from simval.ontos import _main
+
+    rc = _main(
+        [str(R_PENTOMINO / "ontos.stream"), "42", "--metadata",
+         str(R_PENTOMINO / "ontos.json"), "--ticks", "64"]
+    )
+    assert rc == 2
+    assert "mutually exclusive" in capsys.readouterr().err
 
 
 # --- ONT-002/004/005: strict grammar, frame-tick equality, canonical encodings ---

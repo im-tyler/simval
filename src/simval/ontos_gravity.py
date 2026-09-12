@@ -2721,14 +2721,127 @@ def _main(argv=None) -> int:
         help="test-only corpus initial conditions the stream was produced with "
         "(ontos --test-ic; see ontos docs/DESIGN.md corpus coverage)",
     )
+    g = parser.add_argument_group(
+        "expected-run contract (audit ONT-007)",
+        "the verifier must know what run was requested, not just replay the "
+        "stream: pass --metadata ontos.json or the same CLI flags given to ontos",
+    )
+    g.add_argument("--metadata", metavar="PATH", help="ontos.json run-contract file")
+    g.add_argument("--mode", choices=["life", "gravity"])
+    g.add_argument("--ticks", type=int)
+    g.add_argument("--bodies", type=int)
+    g.add_argument("--observer", type=int)
+    g.add_argument("--contacts", action="store_true")
+    g.add_argument("--radial", action="store_true")
+    g.add_argument("--shells", action="store_true")
+    g.add_argument("--walls", action="store_true")
+    g.add_argument("--restitution", type=float)
+    g.add_argument("--friction", type=float)
+    g.add_argument("--demote-at", nargs=3, action="append", default=[], metavar=("T", "RX", "RY"))
+    g.add_argument("--promote-at", nargs=3, action="append", default=[], metavar=("T", "RX", "RY"))
+    g.add_argument("--collapse-at", nargs=3, action="append", default=[], metavar=("T", "RX", "RY"))
+    g.add_argument("--expand-at", nargs=3, action="append", default=[], metavar=("T", "RX", "RY"))
+    g.add_argument("--demote", nargs=2, action="append", default=[], metavar=("RX", "RY"))
+    g.add_argument("--promote", nargs=2, action="append", default=[], metavar=("RX", "RY"))
+    g.add_argument(
+        "--no-contract",
+        action="store_true",
+        help="bare-stream replay with NO expected-run contract. Physics-only; "
+        "a stream that happens to match its own replay still passes. NOT for CI.",
+    )
     args = parser.parse_args(argv)
+
+    gravity_event_levels = {
+        "demote-at": 0,
+        "promote-at": 1,
+        "expand-at": 1,
+        "collapse-at": 2,
+    }
+
+    def _contract_meta_from_flags(is_gravity_stream: bool) -> dict:
+        explicit = any(
+            getattr(args, k) is not None
+            for k in ("mode", "ticks", "bodies", "observer", "restitution", "friction")
+        ) or any(
+            getattr(args, k)
+            for k in (
+                "contacts", "radial", "shells", "walls",
+                "demote_at", "promote_at", "collapse_at", "expand_at",
+                "demote", "promote",
+            )
+        )
+        if args.metadata and explicit:
+            raise ValueError("--metadata and explicit contract flags are mutually exclusive")
+        if args.metadata:
+            import json as _json
+
+            return _json.loads(Path(args.metadata).read_text())
+        if not explicit:
+            return {}
+        mode = args.mode or ("gravity" if is_gravity_stream else "life")
+        meta = {"mode": mode, "seed": args.seed, "ticks": args.ticks}
+        if args.test_ic:
+            meta["test_ic"] = args.test_ic
+        if mode == "gravity":
+            if args.ticks is None or args.bodies is None:
+                raise ValueError("gravity contract needs --ticks and --bodies (or --metadata)")
+            meta["bodies"] = args.bodies
+            events = []
+            for kind in ("demote-at", "promote-at", "collapse-at", "expand-at"):
+                for t, rx, ry in getattr(args, kind.replace("-", "_")):
+                    events.append([int(t), int(rx), int(ry), gravity_event_levels[kind]])
+            meta["events"] = events
+            meta["contacts"] = args.contacts
+            meta["radial"] = args.radial
+            meta["shells"] = args.shells
+            meta["walls"] = args.walls
+            meta["multipole"] = True  # the ontos CLI default (spec section 20)
+            if args.observer is not None:
+                meta["observer"] = args.observer
+            if args.restitution is not None:
+                meta["restitution"] = args.restitution
+            if args.friction is not None:
+                meta["friction"] = args.friction
+        else:
+            events = []
+            for kind in ("demote", "promote"):
+                for rx, ry in getattr(args, kind):
+                    events.append([kind, int(rx), int(ry)])
+            meta["events"] = events
+        return meta
+
     try:
         data = Path(args.stream).read_bytes()
-        if len(data) >= 8 and data[4:8] == struct.pack("<I", 2):
-            summary = verify_stream_gravity(args.stream, args.seed, args.test_ic)
+        is_gravity_stream = len(data) >= 8 and data[4:8] == struct.pack("<I", 2)
+        meta = _contract_meta_from_flags(is_gravity_stream)
+        has_contract = bool(meta) or (args.metadata is not None)
+        if not has_contract and not args.no_contract:
+            raise ValueError(
+                "no expected-run contract: pass --metadata ontos.json or the same "
+                "flags given to ontos (--ticks/--bodies/--events...), or --no-contract "
+                "for an explicit bare-stream replay (not for CI)"
+            )
+        if is_gravity_stream:
+            expected = None
+            if has_contract:
+                if meta.get("mode", "gravity") != "gravity":
+                    raise ValueError("contract declares mode=life but the stream is version 2 (gravity)")
+                expected = GravityContract.from_metadata(meta)
+            elif args.no_contract:
+                print(
+                    "simval.ontos: WARNING: bare-stream replay with no expected-run "
+                    "contract (audit ONT-007): body count, horizon, event schedule and "
+                    "feature modes are NOT validated. Do not use this mode in CI.",
+                    file=sys.stderr,
+                )
+            summary = verify_stream_gravity(
+                args.stream, args.seed, args.test_ic, expected=expected
+            )
             ok = summary["mismatch_count"] == 0
+            contract_note = "" if expected is not None else " [NO CONTRACT]"
             print(
-                f"ontos gravity stream: {'OK' if ok else 'MISMATCH'} | ticks={summary['ticks_verified']} "
+                f"ontos gravity stream: {'OK' if ok else 'MISMATCH'}{contract_note} | "
+                f"ticks={summary['ticks_verified']} "
                 f"records={summary['records_compared']} mismatches={summary['mismatch_count']} "
                 f"max_pos_dev={summary['max_position_deviation']:.3e} "
                 f"mom_drift={summary['momentum_drift']:.3e} energy_drift={summary['energy_drift']:.3e} "
@@ -2739,16 +2852,34 @@ def _main(argv=None) -> int:
             return 0 if ok else 1
         from simval.ontos import verify_stream
 
+        if has_contract:
+            if meta.get("mode", "life") != "life":
+                raise ValueError("contract declares mode=gravity but the stream is version 1 (life)")
+        elif args.no_contract:
+            print(
+                "simval.ontos: WARNING: bare-stream replay with no expected-run "
+                "contract (audit ONT-007): the life event schedule is NOT validated. "
+                "Do not use this mode in CI.",
+                file=sys.stderr,
+            )
         summary = verify_stream(args.stream, args.seed)
-        ok = summary["mismatch_count"] == 0 and summary["tick_monotonic"]
+        problems = []
+        if has_contract:
+            from simval.ontos import life_contract_problems
+
+            problems = life_contract_problems(meta, summary, parse_stream(args.stream)[1])
+        ok = summary["mismatch_count"] == 0 and summary["tick_monotonic"] and not problems
+        contract_note = "" if has_contract else " [NO CONTRACT]"
         print(
-            f"ontos stream: {'OK' if ok else 'MISMATCH'} | ticks={summary['ticks_verified']} "
+            f"ontos stream: {'OK' if ok else 'MISMATCH'}{contract_note} | ticks={summary['ticks_verified']} "
             f"records={summary['records_compared']} mismatches={summary['mismatch_count']} "
             f"final_population={summary['final_population']} "
             f"final_world_hash={summary['final_world_hash']:016x}"
         )
         for m in summary["mismatches"]:
             print(f"  MISMATCH: {m}")
+        for p in problems:
+            print(f"  CONTRACT: {p}")
         return 0 if ok else 1
     except (FileNotFoundError, ValueError) as e:
         print(f"simval.ontos: error: {e}", file=sys.stderr)

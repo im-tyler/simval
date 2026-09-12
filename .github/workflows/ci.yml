@@ -48,12 +48,12 @@ jobs:
           ontos=ontos/target/release/ontos
           verify() {
             $ontos --ticks "$1" --seed "$2" "${@:3}" --out /tmp/case.stream
-            PYTHONPATH=src python -m simval.ontos /tmp/case.stream "$2"
+            PYTHONPATH=src python -m simval.ontos /tmp/case.stream "$2" --ticks "$1" "${@:3}"
           }
           verify_ic() {
             ic="$1"; t="$2"; s="$3"; shift 3
             $ontos --ticks "$t" --seed "$s" "$@" --test-ic "$ic" --out /tmp/case.stream
-            PYTHONPATH=src python -m simval.ontos /tmp/case.stream "$s" --test-ic "$ic"
+            PYTHONPATH=src python -m simval.ontos /tmp/case.stream "$s" --test-ic "$ic" --ticks "$t" "$@"
           }
           verify 64 42
           verify 64 42 --demote 1 0
