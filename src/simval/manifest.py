@@ -86,12 +86,26 @@ def load_manifest(path) -> dict:
 
 
 def verify_manifest(path) -> dict:
-    """Re-hash every file the manifest references and confirm it still matches.
-    Closes the provenance loop: a manifest is not just written, it can be checked
-    later for tampering or drift."""
+    """Re-hash every file the manifest references and confirm it still
+    matches, and recompute the canonical digest over the manifest payload
+    (audit MAN-001): verdict/diagnostics edits after signing must not pass.
+    Closes the provenance loop: a manifest is not just written, it can be
+    checked later for tampering or drift."""
     manifest = load_manifest(path)
     stored = manifest.get("files", {})
     out = {"verified": [], "tampered": [], "missing": [], "verdict": manifest.get("verdict")}
+    stored_digest = manifest.get("canonical_digest")
+    if not stored_digest:
+        out["manifest_tampered"] = (
+            "manifest carries no canonical_digest (unsigned/pre-DET-001 artifact)"
+        )
+    else:
+        recomputed = canonical_digest(manifest)
+        if recomputed != stored_digest:
+            out["manifest_tampered"] = (
+                f"canonical_digest mismatch: stored {stored_digest[:12]}... != "
+                f"recomputed {recomputed[:12]}... — the payload was edited after signing"
+            )
     for rel, expected in stored.items():
         p = Path(rel)
         if not p.exists():
@@ -99,5 +113,5 @@ def verify_manifest(path) -> dict:
             continue
         actual = compute_hashes([p]).get(rel)
         (out["verified"] if actual == expected else out["tampered"]).append(rel)
-    out["ok"] = not out["tampered"] and not out["missing"]
+    out["ok"] = not out["tampered"] and not out["missing"] and "manifest_tampered" not in out
     return out

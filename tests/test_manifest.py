@@ -323,3 +323,61 @@ def test_orchestrate_results_digest_ignores_wall_times():
     assert canonical_digest({"runs": rows_a}) == canonical_digest({"runs": rows_b})
     rows_c = [{"run": "x", "mismatch_count": 1, "wall_s": 1.5}]
     assert canonical_digest({"runs": rows_a}) != canonical_digest({"runs": rows_c})
+
+
+# --- MAN-001: the canonical digest is verified, not just stored ---
+
+
+def test_verify_manifest_detects_verdict_flip(tmp_path):
+    # Files untouched, verdict flipped pass->fail after signing: the file
+    # hashes still match, the digest must not.
+    import numpy as np
+
+    f = tmp_path / "energy.npy"
+    np.save(f, good_energy_series())
+    manifest = build_manifest({}, [check_energy_drift(good_energy_series())], files=[f])
+    assert manifest["verdict"] == "pass"
+    manifest["verdict"] = "fail"
+    out = tmp_path / "prov.json"
+    write_manifest(manifest, out)
+
+    from simval.manifest import verify_manifest
+
+    result = verify_manifest(out)
+    assert result["ok"] is False
+    assert "canonical_digest mismatch" in result["manifest_tampered"]
+    assert not result["tampered"] and not result["missing"]
+
+
+def test_verify_manifest_detects_diagnostics_edit(tmp_path):
+    import numpy as np
+
+    f = tmp_path / "energy.npy"
+    np.save(f, good_energy_series())
+    manifest = build_manifest({}, [check_energy_drift(good_energy_series())], files=[f])
+    manifest["diagnostics"][0]["passed"] = not manifest["diagnostics"][0]["passed"]
+    out = tmp_path / "prov.json"
+    write_manifest(manifest, out)
+
+    from simval.manifest import verify_manifest
+
+    result = verify_manifest(out)
+    assert result["ok"] is False
+    assert "canonical_digest mismatch" in result["manifest_tampered"]
+
+
+def test_verify_manifest_rejects_unsigned_manifest(tmp_path):
+    import numpy as np
+
+    f = tmp_path / "energy.npy"
+    np.save(f, good_energy_series())
+    manifest = build_manifest({}, [check_energy_drift(good_energy_series())], files=[f])
+    del manifest["canonical_digest"]
+    out = tmp_path / "prov.json"
+    write_manifest(manifest, out)
+
+    from simval.manifest import verify_manifest
+
+    result = verify_manifest(out)
+    assert result["ok"] is False
+    assert "no canonical_digest" in result["manifest_tampered"]
