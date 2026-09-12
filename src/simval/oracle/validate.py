@@ -174,8 +174,9 @@ def _fep_metrics(run: Path) -> dict:
     fe = check_free_energy(u_nk)
     ov = check_overlap(u_nk)
     return {
-        "deltaG": float(fe.value),
-        "overlap_min_eig": float(ov.value),
+        "deltaG_kT": float(fe.detail["deltaG_kT"]),
+        "uncertainty_kT": float(fe.detail["uncertainty_kT"]),
+        "overlap_min_eigenvalue": float(ov.detail["overlap_min_eigenvalue"]),
     }
 
 
@@ -269,8 +270,8 @@ _DEFAULT_TOLERANCES = {
     "mass_balance_drift": ("abs", 1e-9),
     "norm_drift": ("abs", 1e-9),
     "tv_distance": ("abs", 1e-9),
-    "deltaG": ("abs", 2.0),
-    "overlap_min_eig": ("min", 0.05),
+    "deltaG_kT": ("abs", 2.0),
+    "uncertainty_kT": ("abs", 1.0),
     "overlap_min_eigenvalue": ("min", 0.05),
     "final_energy_hartree": ("abs", 1e-6),
     "scf_last_delta": ("abs", 1e-6),

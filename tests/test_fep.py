@@ -108,6 +108,39 @@ def test_oracle_fep_case_exists_and_self_matches():
     assert all(v["passed"] for v in compared.values())
 
 
+def test_validate_fep_synthetic_through_the_real_path():
+    # FEP-002: the oracle's own metric names must line up with the golden
+    # so validate() works end to end (the old test renamed keys by hand).
+    from simval.oracle import validate
+
+    result = validate(EXAMPLE, "fep_synthetic")
+    assert result.passed is True, result.detail
+    assert set(result.detail["metrics"]) == {
+        "deltaG_kT", "uncertainty_kT", "overlap_min_eigenvalue",
+    }
+    assert all(m["passed"] for m in result.detail["metrics"].values())
+
+
+def test_validate_fep_synthetic_fails_on_deliberate_deltaG_mutation(tmp_path):
+    # FEP-002 acceptance: a deliberate deltaG mutation of the fixture must
+    # fail — the mutated inputs are also caught by the ORA-003 identity gate.
+    import shutil
+
+    from simval.oracle import validate
+
+    run = tmp_path / "synthetic"
+    shutil.copytree(EXAMPLE, run)
+    assert validate(run, "fep_synthetic").passed is True
+
+    import pandas as pd
+
+    df = pd.read_csv(run / "dhdl.csv")
+    df.iloc[:, 1] = df.iloc[:, 1] + 5.0  # shift every reduced potential
+    df.to_csv(run / "dhdl.csv", index=False)
+    result = validate(run, "fep_synthetic")
+    assert result.passed is False
+
+
 def test_oracle_fep_flags_bad_candidate():
     case = get_case("fep_synthetic")
     bad = dict(case.reference_metrics)
