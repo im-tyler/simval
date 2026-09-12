@@ -45,9 +45,9 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
 
 def _md_metrics(run: Path, selection: str) -> dict:
     from simval import io
-    from simval._util import find_unique
+    from simval._util import find_unique, select_trajectory_topology
 
-    top = find_unique(run, "*.gro", "*.pdb", "*.prmtop", "*.psf", "*.tpr", what="topology")
+    top = select_trajectory_topology(run)
     xtc = find_unique(run, "*.xtc", "*.dcd", "*.trr", "*.nc", what="trajectory")
     if not (top and xtc):
         raise FileNotFoundError(f"run-dir {run} needs a trajectory (.xtc/.dcd/.trr/.nc) and topology (.gro/.pdb/.prmtop/.psf/.tpr)")

@@ -58,3 +58,27 @@ def test_cli_main_real_run(tmp_path, capsys):
     assert "rmsd_plateau" in out
     assert "verdict: FAIL" in out
     assert rc == 1
+
+
+# --- GROM-001: a normal conf.gro + topol.tpr + traj.xtc dir loads and
+# hashes both applicable files ---
+
+
+def test_gro_tpr_xtc_dir_loads_deterministically_and_hashes_both(tmp_path):
+    run = _make_real_run(tmp_path)
+    manifest = diagnose(run, selection="protein")
+    hashed = set(manifest["files"])
+    assert str(run / "conf.gro") in hashed
+    assert str(run / "topol.tpr") in hashed
+    assert str(run / "traj.xtc") in hashed
+    assert manifest["params"]["n_selected_atoms"] > 0
+
+
+def test_tpr_only_dir_uses_tpr_as_trajectory_topology(tmp_path):
+    run = tmp_path / "tpr_only"
+    run.mkdir()
+    shutil.copy(datafiles.XTC, run / "traj.xtc")
+    shutil.copy(datafiles.TPR, run / "topol.tpr")
+    manifest = diagnose(run, selection="protein")
+    assert manifest["params"]["engine"] == "gromacs"
+    assert manifest["params"]["n_selected_atoms"] > 0

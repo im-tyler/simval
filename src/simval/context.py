@@ -112,13 +112,24 @@ class GromacsEngine(EngineAdapter):
 
     def load_context(self, run: Path, selection: str) -> RunContext:
         from simval import io, metadata as meta_mod
+        from simval._util import (
+            select_alternate_topology,
+            select_run_topology,
+            select_structure,
+            select_trajectory_topology,
+        )
         from simval.units import Quantity
 
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
         ctx.run_params["engine"] = "gromacs"
         ctx.run_params["selection"] = selection
 
-        top = _find_unique(run, "*.gro", "*.pdb", "*.prmtop", "*.psf", "*.tpr", what="topology")
+        # MD inputs are ROLES, not mutually-exclusive alternatives: a normal
+        # run-dir carries a structure (.gro/.pdb), a run topology (.tpr) and
+        # a trajectory. Only multiple candidates for the SAME role are
+        # ambiguous; the trajectory-topology precedence is documented in
+        # simval._util (audit GROM-001).
+        top = select_trajectory_topology(run)
         xtc = _find_unique(run, "*.xtc", "*.dcd", "*.trr", "*.nc", what="trajectory")
         ctx.trajectory_path = xtc
         if top and xtc:
@@ -141,7 +152,7 @@ class GromacsEngine(EngineAdapter):
                 # pipeline as a failing per_residue_rmsf error (PIPE-001).
                 ctx.extra["ca_load_error"] = f"{type(e).__name__}: {e}"[:200]
 
-        ctx.tpr_path = _find_unique(run, "*.tpr", what="run topology (tpr)")
+        ctx.tpr_path = select_run_topology(run)
         if ctx.tpr_path is not None:
             ctx.system_atom_types = io.load_atom_types(ctx.tpr_path, selection=selection) or None
             if ctx.system_atom_types:
@@ -153,7 +164,7 @@ class GromacsEngine(EngineAdapter):
             ctx.ff_param_types = [line.strip() for line in ff_p.read_text().splitlines() if line.strip()]
             ctx.consumed_inputs.append(ff_p)
 
-        ctx.structure_path = _find_unique(run, "*.gro", "*.pdb", what="structure")
+        ctx.structure_path = select_structure(run)
 
         xvg = _find_unique(run, "*.xvg", what="energy file (xvg)")
         if xvg is not None:

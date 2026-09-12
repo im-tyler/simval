@@ -244,7 +244,9 @@ def test_two_topologies_rejected(tmp_path):
     (run / "a.gro").write_bytes(b"0")
     (run / "b.pdb").write_bytes(b"0")
     (run / "traj.xtc").write_bytes(b"0")
-    with pytest.raises(ValueError, match="ambiguous topology"):
+    # GROM-001: two candidates for the SAME role (structure) are still
+    # ambiguous; roles themselves are no longer mutually exclusive.
+    with pytest.raises(ValueError, match="ambiguous structure"):
         GromacsEngine().load_context(run, selection="protein")
 
 
@@ -483,3 +485,45 @@ def test_engine_with_no_consumed_inputs_is_a_contract_error():
     ctx = _ctx()
     with pytest.raises(ValueError, match="no consumed inputs"):
         _artifact_files(ctx)
+
+
+# --- GROM-001: MD inputs are roles; a normal gro+tpr+xtc dir loads ---
+
+
+def test_md_input_roles_are_not_mutually_exclusive(tmp_path):
+    # conf.gro + topol.tpr + traj.xtc used to be "ambiguous topology".
+    from simval._util import (
+        select_run_topology,
+        select_structure,
+        select_trajectory_topology,
+    )
+
+    run = tmp_path / "normal"
+    run.mkdir()
+    (run / "conf.gro").write_bytes(b"g")
+    (run / "topol.tpr").write_bytes(b"t")
+    (run / "traj.xtc").write_bytes(b"x")
+    assert select_structure(run).name == "conf.gro"
+    assert select_run_topology(run).name == "topol.tpr"
+    # Documented precedence: structure > run topology > prmtop/psf.
+    assert select_trajectory_topology(run).name == "conf.gro"
+
+    (run / "conf.gro").unlink()
+    assert select_trajectory_topology(run).name == "topol.tpr"
+
+    (run / "sys.prmtop").write_bytes(b"p")
+    (run / "topol.tpr").unlink()
+    assert select_trajectory_topology(run).name == "sys.prmtop"
+
+
+def test_same_role_ambiguity_still_rejected(tmp_path):
+    from simval._util import select_structure, select_trajectory_topology
+
+    run = tmp_path / "amb"
+    run.mkdir()
+    (run / "a.gro").write_bytes(b"0")
+    (run / "b.gro").write_bytes(b"0")
+    with pytest.raises(ValueError, match="ambiguous structure"):
+        select_structure(run)
+    with pytest.raises(ValueError, match="ambiguous"):
+        select_trajectory_topology(run)
