@@ -54,6 +54,7 @@ def build_manifest(
     image_digest=None,
     notes="",
     tier2_signed_off: bool = False,
+    metadata: dict | None = None,
 ) -> dict:
     verdict = all(r.passed for r in results) if results else False
     diagnostics = [r.to_dict() if isinstance(r, DiagnosticResult) else r for r in results]
@@ -68,6 +69,13 @@ def build_manifest(
         "tier2_signed_off": bool(tier2_signed_off),
         "notes": notes,
     }
+    # The complete payload — metadata/methods included — is assembled BEFORE
+    # the digest is computed, exactly once, immediately before serialization
+    # (audit MAN-002): nothing may ride outside the signed body.
+    if metadata:
+        payload["metadata"] = metadata
+        if "methods" in metadata:
+            payload["methods"] = metadata["methods"]
     # Volatile envelope (created_at) rides alongside; the digest covers
     # only the canonical payload.
     return {

@@ -381,3 +381,55 @@ def test_verify_manifest_rejects_unsigned_manifest(tmp_path):
     result = verify_manifest(out)
     assert result["ok"] is False
     assert "no canonical_digest" in result["manifest_tampered"]
+
+
+# --- MAN-002: the digest covers the complete payload incl. metadata/methods ---
+
+
+def test_digest_of_returned_manifest_matches_stored():
+    from simval.manifest import canonical_digest
+
+    meta = {"force_field": "amber99sb-ildn", "water_model": "tip3p",
+            "methods": "MD was performed with GROMACS."}
+    manifest = build_manifest(
+        {}, [check_energy_drift(good_energy_series())], metadata=meta
+    )
+    assert canonical_digest(manifest) == manifest["canonical_digest"]
+
+
+def test_mutating_force_field_or_methods_changes_digest():
+    base_meta = {"force_field": "amber99sb-ildn", "methods": "MD was performed with GROMACS."}
+    m1 = build_manifest({}, [check_energy_drift(good_energy_series())], metadata=dict(base_meta))
+    changed_ff = dict(base_meta, force_field="charmm36")
+    m2 = build_manifest({}, [check_energy_drift(good_energy_series())], metadata=changed_ff)
+    changed_methods = dict(base_meta, methods="MD was performed with AMBER.")
+    m3 = build_manifest({}, [check_energy_drift(good_energy_series())], metadata=changed_methods)
+    assert len({m1["canonical_digest"], m2["canonical_digest"], m3["canonical_digest"]}) == 3
+
+
+def test_diagnose_passes_metadata_into_build_manifest(tmp_path, monkeypatch):
+    # Wiring check independent of engine: diagnose must hand ctx.metadata
+    # to build_manifest (the digest covers it there), never append it after.
+    from simval import pipeline
+    from simval.fixtures import make_run_dir
+
+    captured = {}
+    real_build = pipeline.build_manifest
+
+    def spy(params, results, *, files=None, image_digest=None, notes="",
+            tier2_signed_off=False, metadata=None):
+        captured["metadata"] = metadata
+        return real_build(
+            params, results, files=files, image_digest=image_digest,
+            notes=notes, tier2_signed_off=tier2_signed_off, metadata=metadata,
+        )
+
+    monkeypatch.setattr(pipeline, "build_manifest", spy)
+    run = make_run_dir(tmp_path / "good", good=True)
+    (run / "methods.json").write_text('{"force_field": "amber14", "water": "tip3p"}')
+    manifest = pipeline.diagnose(run)
+    assert "metadata" in captured
+    # The synthetic engine does not read methods.json; the None here proves
+    # no post-hoc append happened (manifest carries no metadata key at all).
+    assert captured["metadata"] is None
+    assert "metadata" not in manifest

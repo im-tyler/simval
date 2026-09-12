@@ -242,10 +242,9 @@ def diagnose(run_dir, *, out: str = "provenance.json", selection: str = "protein
     if ctx.skipped:
         run_params["skipped"] = ctx.skipped
 
-    manifest = build_manifest(run_params, results, files=_artifact_files(ctx), image_digest=None)
-    if ctx.metadata:
-        manifest["metadata"] = ctx.metadata
-        if "methods" in ctx.metadata:
-            manifest["methods"] = ctx.metadata["methods"]
+    manifest = build_manifest(
+        run_params, results, files=_artifact_files(ctx), image_digest=None,
+        metadata=ctx.metadata or None,
+    )
     write_manifest(manifest, run / out)
     return manifest
