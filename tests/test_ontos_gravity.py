@@ -229,6 +229,61 @@ def test_donor_region_refits_after_foreign_absorption():
     assert w.region_window_deadline[0] is None
 
 
+# --- ONT-012: re-demotion materializes and clears the region's old fits ---
+
+
+def test_re_demote_discards_stale_fits_at_boundary():
+    # Re-demoting an already-Coarse region must materialize and discard
+    # every old fit of the region before building the new window. An
+    # out-of-box member would otherwise keep a fit whose validity ends
+    # at its own t0 + WINDOW while the region deadline advances to the
+    # new t0 + WINDOW, and the polynomial would be evaluated past its
+    # window end.
+    w = GravityWorld(11, 8)
+    w.bodies[0]["x"] = 127.995
+    w.bodies[0]["y"] = 96.0
+    w.bodies[0]["vx"] = 0.5
+    w.bodies[0]["vy"] = 0.0
+    for b in w.bodies[1:]:
+        b["x"] = 100.0
+        b["y"] = 100.0
+    w.schedule(1, 3, 0)
+    w.schedule(30, 3, 0)
+    while w.tick < 29:
+        w.step()
+    assert w.coarse[0] is not None, "body 0 carried a fit into tick 30"
+    w.step()
+    assert w.coarse[0] is None, "out-of-box member thawed at the re-demotion boundary"
+    assert w.region_window_deadline[3] == 30 + 32, "one coherent new window"
+    while w.tick < 70:
+        w.step()
+        for i in range(len(w.bodies)):
+            if w.coarse[i] is not None:
+                assert w.tick <= w.coarse[i]["t0"] + 32, (
+                    f"body {i} fit t0 {w.coarse[i]['t0']} evaluated at {w.tick} "
+                    "past its window end"
+                )
+
+
+def test_re_demote_excludes_collapsed_bodies_from_membership():
+    # Corrected ontos demote membership excludes collapsed bodies (the
+    # section 14 rule): a body collapsed into a foreign region whose
+    # monopole sits inside this box must not receive a window fit.
+    w = GravityWorld(11, 8)
+    for b in w.bodies[1:]:
+        b["x"] = 100.0
+        b["y"] = 100.0
+    w.schedule(1, 3, 2)
+    w.step()
+    assert w.region_collapsed[3] is not None
+    assert 0 not in w.region_collapsed[3]["members"], "seed 11 body 0 outside region 3"
+    w.bodies[0]["x"] = w.region_collapsed[3]["com_x"]
+    w.bodies[0]["y"] = w.region_collapsed[3]["com_y"]
+    w.schedule(2, 3, 0)
+    w.step()
+    assert w.coarse[0] is None, "collapsed body never joins a window"
+
+
 # --- Section 19: collapse and reconstruction ---
 
 

@@ -358,10 +358,22 @@ class GravityWorld:
     def _demote(self, region: int, t0: int) -> None:
         x0 = (region % 2) * 64.0
         y0 = (region // 2) * 64.0
+        # Section 26 materialization applies to re-demotion too (audit
+        # ONT-012): every existing window fit of the region is
+        # materialized and discarded before membership is re-evaluated,
+        # exactly like collapse-on-coarse. An out-of-box member would
+        # otherwise keep its old fit while the region deadline advances
+        # past that fit's own [t0, t0 + WINDOW] validity end.
+        for i in range(len(self.bodies)):
+            if self.coarse[i] is not None and self.body_region[i] == region:
+                self.bodies[i] = self._state_at(i, t0)
+                self.coarse[i] = None
+                self.body_region[i] = UNMANAGED
         members = [
             i
             for i in range(len(self.bodies))
-            if (lambda b: b["x"] >= x0 and b["x"] < x0 + 64.0 and b["y"] >= y0 and b["y"] < y0 + 64.0)(
+            if self.body_collapsed[i] is None
+            and (lambda b: b["x"] >= x0 and b["x"] < x0 + 64.0 and b["y"] >= y0 and b["y"] < y0 + 64.0)(
                 self._state_at(i, t0)
             )
         ]
