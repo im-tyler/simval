@@ -23,6 +23,30 @@ from simval import relativistic  # noqa: F401
 from simval.manifest import build_manifest, write_manifest
 
 
+def _error_result(name: str, exc: Exception):
+    from simval.result import DiagnosticResult
+
+    return DiagnosticResult(
+        name=name,
+        passed=False,
+        threshold=0.0,
+        value=0.0,
+        detail={"status": "error", "error": f"{type(exc).__name__}: {exc}"[:200]},
+    )
+
+
+def _guarded(ctx: RunContext, name: str, results: list, fn):
+    """Run one diagnostic. Optional-dependency absence (ImportError) is an
+    explicit skip; any other raise from an applicable check is a failing
+    error result that blocks the verdict (audit PIPE-001)."""
+    try:
+        results.append(fn())
+    except (ImportError, ModuleNotFoundError) as e:
+        ctx.skipped[name] = f"optional dependency unavailable: {e}"[:160]
+    except Exception as e:
+        results.append(_error_result(name, e))
+
+
 def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
     """Run every check whose inputs are present on the context.
     Adding a check = adding a branch here; adding a domain = an engine that
@@ -41,26 +65,54 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
         results.append(equilibration.check_equilibration(rseries, **T.kwargs_for("structural_equilibration", t)))
 
     if ctx.ca_positions is not None and ctx.ca_reference is not None:
-        results.append(rmsf_mod.check_rmsf(
-            ctx.ca_positions, ctx.ca_reference, labels=ctx.ca_labels,
-            **T.kwargs_for("per_residue_rmsf", t)))
+        _guarded(
+            ctx,
+            "per_residue_rmsf",
+            results,
+            lambda: rmsf_mod.check_rmsf(
+                ctx.ca_positions, ctx.ca_reference, labels=ctx.ca_labels,
+                **T.kwargs_for("per_residue_rmsf", t)),
+        )
+    elif ctx.extra.get("ca_load_error"):
+        results.append(
+            _error_result("per_residue_rmsf", RuntimeError(ctx.extra["ca_load_error"]))
+        )
 
     if ctx.system_atom_types is not None and ctx.ff_param_types is not None:
         results.append(ff_coverage.check_ff_coverage(ctx.system_atom_types, ctx.ff_param_types))
 
     if ctx.structure_path is not None:
-        results.append(prep_mod.check_box_cutoff(ctx.structure_path, rcoulomb=1.0, **T.kwargs_for("box_cutoff", t)))
-        results.append(prep_mod.check_steric_clashes(ctx.structure_path))
+        _guarded(
+            ctx,
+            "box_cutoff",
+            results,
+            lambda: prep_mod.check_box_cutoff(
+                ctx.structure_path, rcoulomb=1.0, **T.kwargs_for("box_cutoff", t)),
+        )
+        _guarded(
+            ctx,
+            "steric_clashes",
+            results,
+            lambda: prep_mod.check_steric_clashes(ctx.structure_path),
+        )
         if ctx.tpr_path is not None:
-            try:
-                results.append(prep_mod.check_charge_state(ctx.structure_path, tpr_path=ctx.tpr_path, **T.kwargs_for("charge_state", t)))
-            except Exception as e:
-                ctx.skipped["charge_state"] = str(e)[:160]
+            _guarded(
+                ctx,
+                "charge_state",
+                results,
+                lambda: prep_mod.check_charge_state(
+                    ctx.structure_path, tpr_path=ctx.tpr_path,
+                    **T.kwargs_for("charge_state", t)),
+            )
         if ctx.trajectory_path is not None:
-            try:
-                results.append(hbonds.check_hydrogen_bonds(ctx.structure_path, ctx.trajectory_path, **T.kwargs_for("hydrogen_bonds", t)))
-            except Exception as e:
-                ctx.skipped["hydrogen_bonds"] = str(e)[:160]
+            _guarded(
+                ctx,
+                "hydrogen_bonds",
+                results,
+                lambda: hbonds.check_hydrogen_bonds(
+                    ctx.structure_path, ctx.trajectory_path,
+                    **T.kwargs_for("hydrogen_bonds", t)),
+            )
 
     if ctx.params is not None:
         results.append(params_mod.check_params(ctx.params))

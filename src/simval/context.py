@@ -117,8 +117,16 @@ class GromacsEngine(EngineAdapter):
                 ctx.ca_positions, ctx.ca_reference, _ = io.load_trajectory(
                     xtc, top, selection="protein and name CA")
                 ctx.ca_labels = io.load_residue_labels(top)
-            except Exception:
-                pass
+            except (ImportError, ModuleNotFoundError) as e:
+                ctx.skipped["ca_positions"] = f"optional dependency unavailable: {e}"[:160]
+            except ValueError as e:
+                # No CA atoms / selection not applicable to this topology:
+                # explicitly not-applicable, recorded as a skip.
+                ctx.skipped["ca_positions"] = f"CA selection not applicable: {e}"[:160]
+            except Exception as e:
+                # Unexpected failure of an applicable load: surfaced to the
+                # pipeline as a failing per_residue_rmsf error (PIPE-001).
+                ctx.extra["ca_load_error"] = f"{type(e).__name__}: {e}"[:200]
 
         ctx.tpr_path = _find(run, "*.tpr")
         if ctx.tpr_path is not None:
