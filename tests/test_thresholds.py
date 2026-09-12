@@ -1,7 +1,10 @@
 import json
 
+import pytest
+
 from simval.fixtures import make_run_dir
 from simval.pipeline import diagnose
+from simval.thresholds import load as load_thresholds
 
 
 def test_threshold_override_takes_effect(tmp_path):
@@ -26,10 +29,6 @@ def test_thresholds_json_in_run_dir(tmp_path):
 
 # --- ORA-004: externally supplied thresholds must be finite/positive/bounded ---
 
-
-import pytest  # noqa: E402
-
-from simval.thresholds import load as load_thresholds  # noqa: E402
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf"), 0.0, -1.0, 1e9])

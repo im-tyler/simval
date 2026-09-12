@@ -37,7 +37,7 @@ def load_atom_types(top, *, selection: str = "protein") -> list[str]:
         u = mda.Universe(str(top))
         grp = u.select_atoms(selection) if selection else u.atoms
         return list(grp.types)
-    except IOError as e:
+    except OSError as e:
         msg = str(e)
         if "tpr" in msg.lower() or "gromacs" in msg.lower():
             return []

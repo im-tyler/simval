@@ -14,7 +14,6 @@ from pathlib import Path
 from simval.context import EngineAdapter, RunContext, register_engine
 from simval.ontos import check_life_contract, verify_stream
 from simval.ontos_gravity import GravityContract, verify_stream_gravity
-from simval.result import DiagnosticResult
 
 
 def _is_gravity(run: Path) -> bool:

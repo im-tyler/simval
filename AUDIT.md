@@ -222,11 +222,31 @@ Golden/reference files touched in batch 2, and why:
   an older MDAnalysis DCD reader).
 - `references/h2_rhf.json` — `converged: 1.0` (exact) added (PYS-001).
 - `references/fep_synthetic.json` — overlap tolerance re-encoded as
-  `["min", 0.05]` (FEP-001).
+  `["min", 0.05]` (FEP-001); metrics + tolerances regenerated from the
+  committed fixture (FEP-002: the golden had been recorded from
+  synthetic_u_nk(seed=42, n=20000) while the shipped dhdl.csv is
+  seed=7/n=500; tolerances recalibrated to that fixture's sampling noise).
 - all 14 references — `identity` block added (ORA-003): config/data-file
   sha256s from each case's fixture (`adk_morph` from the MDAnalysisTests
   datafiles; `lysozyme_nvt_30ps` from the canonical conf.gro/traj.xtc/
   energy.xvg of pipeline/runs/lysozyme — note that raw dir also carries
   duplicate nvt.xtc/nvt.tpr copies, so validate() on it correctly fails
   IO-001 ambiguity; validate against a copy with the duplicates removed).
+
+Deliberate test-behavior updates (each locked in the old behavior):
+
+- `tests/test_manifest.py::test_optional_dependency_absence_is_explicit_skip`
+  → split into skip-without-invoking and ImportError-fails (PIPE-002).
+- `tests/test_manifest.py` PIPE-001 error tests declare capabilities
+  present via the new allowlist (PIPE-002).
+- `tests/test_manifest.py::test_two_topologies_rejected` — "ambiguous
+  topology" → "ambiguous structure" (GROM-001 role semantics).
+- `tests/test_ontos.py::test_module_cli_verifies_and_rejects` — now runs
+  with `--metadata` (ONT-007 contract requirement).
+- `tests/test_reference_rules.py` — shipped-case count 15 → 14 (benzene
+  retirement) and every golden must carry identity (ORA-003).
+- `tests/test_pyscf_eng.py::test_h2_reference_case_exists_and_matches_fresh_run`
+  — used the pre-ORA-001 metric key `final_energy`; fixed to
+  `final_energy_hartree` (stale since the §F rename, only visible with
+  pyscf installed).
 

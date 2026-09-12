@@ -39,7 +39,7 @@ def test_load_atom_types_typed_tpr_unavailable_returns_empty(monkeypatch, tmp_pa
 
     class _RefusingUniverse:
         def __init__(self, path):
-            raise IOError("TPR files produced with beta versions of gromacs 2020 are not supported.")
+            raise OSError("TPR files produced with beta versions of gromacs 2020 are not supported.")
 
     fake = types_mod.ModuleType("MDAnalysis")
     fake.Universe = _RefusingUniverse

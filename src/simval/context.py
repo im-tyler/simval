@@ -113,7 +113,6 @@ class GromacsEngine(EngineAdapter):
     def load_context(self, run: Path, selection: str) -> RunContext:
         from simval import io, metadata as meta_mod
         from simval._util import (
-            select_alternate_topology,
             select_run_topology,
             select_structure,
             select_trajectory_topology,

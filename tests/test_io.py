@@ -104,5 +104,5 @@ def test_preferred_energy_documented_aliases(tmp_path):
     for alias in io.CONSERVED_ENERGY_ALIASES:
         xvg = tmp_path / "energy.xvg"
         xvg.write_text(f'@ s0 legend "{alias}"\n0.0 -12345.0\n1.0 -12344.5\n')
-        term, arr = io.load_preferred_energy(xvg)
+        term = io.load_preferred_energy(xvg)[0]
         assert term == alias

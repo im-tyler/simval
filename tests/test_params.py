@@ -29,7 +29,7 @@ def test_unknown_params_ignored():
 # --- PAR-001: non-finite quantities are rejected before range checks ---
 
 
-import pytest  # noqa: E402
+import pytest
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])

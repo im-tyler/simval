@@ -489,7 +489,7 @@ def life_contract_problems(meta: dict, summary: dict, records: list) -> list[str
 _LIFE_EVENT_KINDS = {"demote": 0, "promote": 1}
 
 
-def check_life_contract(meta: dict, summary: dict, records: list) -> "DiagnosticResult | None":
+def check_life_contract(meta: dict, summary: dict, records: list) -> DiagnosticResult | None:
     """Engine-adapter wrapper: a failed life run contract as a DiagnosticResult."""
     problems = life_contract_problems(meta, summary, records)
     if not problems:

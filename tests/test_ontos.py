@@ -445,8 +445,7 @@ def test_life_event_at_later_boundary_fails_contract(tmp_path):
     p = tmp_path / "moved.stream"
     p.write_bytes(mutated)
 
-    from simval.ontos import parse_stream, verify_stream
-    from simval.ontos import life_contract_problems
+    from simval.ontos import life_contract_problems, parse_stream, verify_stream
 
     _, records = parse_stream(p)
     summary = verify_stream(p, 42)

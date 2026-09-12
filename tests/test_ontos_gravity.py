@@ -1838,8 +1838,6 @@ def test_observer_duplicate_policy_event_fails(tmp_path):
 
 
 def test_observer_clean_run_event_multiset_matches(tmp_path):
-    import shutil
-
     from simval.ontos_gravity import check_zoom_policy, parse_stream_v2
 
     for name, seed, offset in (("observer", 5, 777), ("collapse_observer", 13, 42)):

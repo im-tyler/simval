@@ -72,8 +72,8 @@ def _md_metrics(run: Path, selection: str) -> dict:
 
     xvg = find_unique(run, "*.xvg", what="energy file (xvg)")
     if xvg:
-        from simval.diagnostics import energy as energy_mod
         from simval import io as io_mod
+        from simval.diagnostics import energy as energy_mod
         try:
             _term, e = io_mod.load_preferred_energy(xvg)
         except ValueError:
