@@ -157,11 +157,18 @@ class GromacsEngine(EngineAdapter):
 
         xvg = _find_unique(run, "*.xvg", what="energy file (xvg)")
         if xvg is not None:
-            term, arr = io.load_preferred_energy(xvg)
-            ctx.energy = arr
-            ctx.run_params["energy_term"] = term
-            ctx.run_params["n_energy_samples"] = int(ctx.energy.size)
-            ctx.consumed_inputs.append(xvg)
+            try:
+                term, arr = io.load_preferred_energy(xvg)
+            except ValueError as e:
+                # No labeled conserved-energy column: the energy check is
+                # explicitly not applicable, never silently run on an
+                # arbitrary positional column (audit IO-002).
+                ctx.skipped["energy"] = str(e)[:160]
+            else:
+                ctx.energy = arr
+                ctx.run_params["energy_term"] = term
+                ctx.run_params["n_energy_samples"] = int(ctx.energy.size)
+                ctx.consumed_inputs.append(xvg)
 
         params_path = run / "params.json"
         if params_path.exists():

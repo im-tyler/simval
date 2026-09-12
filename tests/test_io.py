@@ -63,3 +63,46 @@ def test_xvg_rejects_empty(tmp_path):
     xvg.write_text('@ s0 legend "X"\n# nothing\n')
     with pytest.raises(ValueError):
         io.load_energy_xvg(xvg)
+
+
+# --- IO-002: no positional fallback for the conserved-energy column ---
+
+
+def test_preferred_energy_prefers_conserved_label(tmp_path):
+    xvg = tmp_path / "energy.xvg"
+    xvg.write_text(
+        '@ s0 legend "Temperature"\n'
+        '@ s1 legend "Conserved En."\n'
+        "0.0 300.0 -12345.0\n1.0 301.0 -12344.5\n"
+    )
+    term, arr = io.load_preferred_energy(xvg)
+    assert term == "Conserved En."
+    assert arr[0] == -12345.0
+
+
+def test_preferred_energy_missing_label_is_error_not_first_column(tmp_path):
+    # The old fallback would return the first non-time column (here
+    # Temperature), silently drift-checking a non-conserved quantity.
+    xvg = tmp_path / "energy.xvg"
+    xvg.write_text(
+        '@ s0 legend "Temperature"\n'
+        '@ s1 legend "Box-X"\n'
+        "0.0 300.0 4.0\n1.0 301.0 4.0\n"
+    )
+    with pytest.raises(ValueError, match="no conserved-energy column"):
+        io.load_preferred_energy(xvg)
+
+
+def test_preferred_energy_unlabeled_columns_rejected(tmp_path):
+    xvg = tmp_path / "energy.xvg"
+    xvg.write_text("0.0 -12345.0\n1.0 -12344.5\n")
+    with pytest.raises(ValueError, match="no conserved-energy column"):
+        io.load_preferred_energy(xvg)
+
+
+def test_preferred_energy_documented_aliases(tmp_path):
+    for alias in io.CONSERVED_ENERGY_ALIASES:
+        xvg = tmp_path / "energy.xvg"
+        xvg.write_text(f'@ s0 legend "{alias}"\n0.0 -12345.0\n1.0 -12344.5\n')
+        term, arr = io.load_preferred_energy(xvg)
+        assert term == alias

@@ -43,3 +43,22 @@ def test_rejects_short_input():
 
     with pytest.raises(ValueError):
         check_energy_drift(np.array([1.0]))
+
+
+# --- IO-002: a conserved-energy column must be labeled, never positional ---
+
+
+def test_engine_records_explicit_skip_when_xvg_lacks_conserved_label(tmp_path):
+    # A trajectory-less run-dir: the xvg is still consumed, and without a
+    # labeled conserved column the energy check must be an explicit skip,
+    # never a positional first-column fallback (audit IO-002).
+    from simval.context import GromacsEngine
+
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "energy.xvg").write_text(
+        '@ s0 legend "Temperature"\n0.0 300.0\n1.0 301.0\n2.0 300.5\n'
+    )
+    ctx = GromacsEngine().load_context(run, selection="protein")
+    assert ctx.energy is None
+    assert "no conserved-energy column" in ctx.skipped["energy"]

@@ -72,8 +72,16 @@ def _md_metrics(run: Path, selection: str) -> dict:
     xvg = find_unique(run, "*.xvg", what="energy file (xvg)")
     if xvg:
         from simval.diagnostics import energy as energy_mod
-        _term, e = io.load_preferred_energy(xvg)
-        metrics["energy_relative_range"] = float(energy_mod.check_energy_drift(e).value)
+        from simval import io as io_mod
+        try:
+            _term, e = io_mod.load_preferred_energy(xvg)
+        except ValueError:
+            # No labeled conserved-energy column: the metric is not
+            # computable from this run and stays absent from the candidate,
+            # so any reference that requires it fails (audit IO-002).
+            pass
+        else:
+            metrics["energy_relative_range"] = float(energy_mod.check_energy_drift(e).value)
 
     return metrics
 

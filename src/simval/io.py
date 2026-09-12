@@ -45,15 +45,33 @@ def load_atom_names(top, *, selection: str | None = None) -> list[str]:
     return list(grp.names)
 
 
+CONSERVED_ENERGY_ALIASES = (
+    "Conserved-En.",
+    "Conserved En.",
+    "Conserved-En",
+    "Total-Energy",
+    "Total Energy",
+)
+
+
 def load_preferred_energy(path):
-    """Return (term_name, array) — the conserved-energy column if present
-    (correct for thermostatted/NVT runs), else the first non-time column."""
+    """Return (term_name, array) for the conserved-energy column.
+
+    Only explicit, labeled columns are accepted — the documented alias set
+    above (GROMACS spellings of the conserved energy and the total energy).
+    A file whose expected label is missing is an error, never a positional
+    fallback to the first data column: an arbitrary column (temperature,
+    box edge, pressure) is not a conserved quantity and silently drifts
+    the verdict (audit IO-002).
+    """
     cols = load_energy_xvg(path, column=None)
-    for key in ("Conserved-En.", "Conserved En.", "Conserved-En", "Total-Energy", "Total Energy"):
+    for key in CONSERVED_ENERGY_ALIASES:
         if key in cols:
             return key, cols[key]
-    name, arr = next((k, v) for k, v in cols.items() if k != "time")
-    return name, arr
+    raise ValueError(
+        f"{path}: no conserved-energy column labeled {list(CONSERVED_ENERGY_ALIASES)} "
+        f"(found: {sorted(k for k in cols if k != 'time')})"
+    )
 
 
 def load_residue_labels(top, *, selection: str = "protein and name CA") -> list[str]:

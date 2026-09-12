@@ -1,10 +1,9 @@
 {
-  "description": "Hen lysozyme (1AKI) via OpenMM (amber14 + tip3p), minimized + 10ps NVT. Second MD engine through the same adapter; better-equilibrated than the 30ps GROMACS run.",
+  "description": "Hen lysozyme (1AKI) via OpenMM (amber14 + tip3p), minimized + 10ps NVT. Second MD engine through the same adapter; better-equilibrated than the 30ps GROMACS run. The committed energy.xvg carries only a 'Potential' column; since IO-002 removed the positional first-column fallback, the conserved-energy metric is not computable from this fixture and is not asserted.",
   "engine": "gromacs",
   "force_field": "amber14",
   "name": "lysozyme_openmm",
   "reference_metrics": {
-    "energy_relative_range": 0.007435644438489783,
     "final_rg_nm": 1.397441029548645,
     "final_rmsd_nm": 0.11195787388597397,
     "mean_rg_nm": 1.3968079090118408,
