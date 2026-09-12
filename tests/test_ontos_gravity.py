@@ -176,6 +176,59 @@ def test_rebound_anchor_agrees():
     assert result.value < 1e-4
 
 
+# --- ONT-011: per-region window deadline, independent of member Fits ---
+
+
+def test_empty_demote_refits_at_deadline():
+    # A demotion with no in-box bodies still owes its t0 + WINDOW
+    # re-fit. The deadline must be armed so the empty re-fit path
+    # returns the region to Fine when it fires; before the fix the
+    # region stayed Coarse forever (no member Fit could carry the
+    # obligation).
+    w = GravityWorld(1, 1)
+    b = w.bodies[0]
+    assert not (b["x"] < 64.0 and b["y"] < 64.0), "seed 1 keeps body 0 outside region 0"
+    w.schedule(1, 0, 0)
+    w.step()
+    assert w.tick == 1
+    assert w.region_coarse[0]
+    assert w.region_window_deadline[0] == 1 + 32
+    while w.tick < 32:
+        w.step()
+    assert w.region_coarse[0], "before the deadline"
+    w.step()
+    assert w.tick == 33
+    assert not w.region_coarse[0], "empty re-fit at deadline"
+    assert w.region_window_deadline[0] is None
+
+
+def test_donor_region_refits_after_foreign_absorption():
+    # Foreign-window absorption (section 26 collapse) removes the donor
+    # region's only member Fit; the donor's own deadline still fires and
+    # the now-memberless donor returns to Fine (fit-scan detection
+    # stalled forever before ONT-011).
+    w = GravityWorld(11, 8)
+    w.bodies[0]["x"] = 63.995
+    w.bodies[0]["y"] = 32.0
+    w.bodies[0]["vx"] = 0.5
+    w.bodies[0]["vy"] = 0.0
+    for b in w.bodies[1:]:
+        b["x"] = 100.0
+        b["y"] = 100.0
+    w.schedule(1, 0, 0)
+    w.schedule(30, 1, 2)
+    while w.tick < 32:
+        w.step()
+    assert w.region_collapsed[1] is not None
+    assert w.body_collapsed[0] is not None, "body 0 absorbed by region 1"
+    assert w.coarse[0] is None, "absorption dropped the body fit"
+    assert w.region_coarse[0]
+    w.step()
+    assert w.tick == 1 + 32, "donor deadline was t0 + WINDOW"
+    assert not w.region_coarse[0], "donor refits at its deadline with no surviving member fit"
+    assert w.region_window_deadline[0] is None
+
+
 # --- Section 19: collapse and reconstruction ---
 
 

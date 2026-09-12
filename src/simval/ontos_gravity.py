@@ -248,6 +248,7 @@ class GravityWorld:
         self.coarse = [None] * count
         self.body_region = [UNMANAGED] * count
         self.region_coarse = [False] * 4
+        self.region_window_deadline: list[int | None] = [None] * 4
         self.region_collapsed = [None] * 4
         self.body_collapsed = [None] * count
         self.reconstructed: set[int] = set()
@@ -365,6 +366,11 @@ class GravityWorld:
             )
         ]
         self.region_coarse[region] = True
+        # Section 14 owes every demotion its t0 + WINDOW re-fit, empty
+        # ones included (audit ONT-011): the per-region deadline is the
+        # only carrier of that obligation, independent of member Fits —
+        # the empty re-fit path is what returns the region to Fine.
+        self.region_window_deadline[region] = t0 + WINDOW
         if not members:
             return
         self._fit_members(members, t0)
@@ -378,6 +384,7 @@ class GravityWorld:
                 self.coarse[i] = None
                 self.body_region[i] = UNMANAGED
         self.region_coarse[region] = False
+        self.region_window_deadline[region] = None
 
     def _collapse(self, region: int, t: int) -> None:
         x0 = (region % 2) * 64.0
@@ -521,6 +528,7 @@ class GravityWorld:
         }
         self.region_collapsed[region] = rec
         self.last_collapses.append(rec)
+        self.region_window_deadline[region] = None
         for i in members:
             self.body_collapsed[i] = region
             self.body_region[i] = region
@@ -618,6 +626,7 @@ class GravityWorld:
                 self.reconstructed.add(i)
             states = [dict(self.bodies[i]) for i in members]
         self.region_collapsed[region] = None
+        self.region_window_deadline[region] = None
         self.expand_count += 1
         self.last_expansion = {
             "tick": t,
@@ -833,6 +842,9 @@ class GravityWorld:
         return (r1 if r1 * r1 <= r2 * r2 else r2), False
 
     def _refit(self, region: int, t: int) -> None:
+        # The deadline is consumed on execution and re-armed only when
+        # the window keeps members (audit ONT-011).
+        self.region_window_deadline[region] = None
         x0 = (region % 2) * 64.0
         y0 = (region // 2) * 64.0
         members = [
@@ -858,6 +870,7 @@ class GravityWorld:
         self._fit_members(keep, t)
         for i in keep:
             self.body_region[i] = region
+        self.region_window_deadline[region] = t + WINDOW
 
     def _static_impulse(self, i, nx, ny, vrx, vry):
         """Spec section 24 one-sided impulse vs a frozen contactant."""
@@ -1112,15 +1125,12 @@ class GravityWorld:
             elif self.region_collapsed[region] is None:
                 self._collapse(region, entering)
         for region in range(4):
-            if self.region_coarse[region] and self.region_collapsed[region] is None:
-                ended = any(
-                    self.body_region[i] == region
-                    and self.coarse[i] is not None
-                    and entering == self.coarse[i]["t0"] + WINDOW
-                    for i in range(len(self.bodies))
-                )
-                if ended:
-                    self._refit(region, entering)
+            if (
+                self.region_coarse[region]
+                and self.region_collapsed[region] is None
+                and self.region_window_deadline[region] == entering
+            ):
+                self._refit(region, entering)
 
         n = len(self.bodies)
         coarse = [self.coarse[i] is not None for i in range(n)]
