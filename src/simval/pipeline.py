@@ -89,6 +89,10 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
 
     if ctx.energy is not None:
         results.append(energy.check_energy_drift(ctx.energy, **T.kwargs_for("energy_drift", t)))
+    elif ctx.extra.get("energy_load_error"):
+        # A present-but-malformed energy file is a failing error, not an
+        # absent observable (audit IO-003).
+        results.append(_error_result("energy_drift", RuntimeError(ctx.extra["energy_load_error"])))
 
     if ctx.positions is not None and ctx.reference is not None:
         rseries = rmsd_mod.rmsd_over_time(ctx.positions, ctx.reference)

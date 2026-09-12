@@ -76,10 +76,12 @@ def _md_metrics(run: Path, selection: str) -> dict:
         from simval.diagnostics import energy as energy_mod
         try:
             _term, e = io_mod.load_preferred_energy(xvg)
-        except ValueError:
+        except io_mod.ConservedEnergyColumnMissing:
             # No labeled conserved-energy column: the metric is not
             # computable from this run and stays absent from the candidate,
-            # so any reference that requires it fails (audit IO-002).
+            # so any reference that requires it fails (audit IO-002). A
+            # malformed file raises XvgParseError and must fail the
+            # validation, not skip the metric (audit IO-003).
             pass
         else:
             metrics["energy_relative_range"] = float(energy_mod.check_energy_drift(e).value)

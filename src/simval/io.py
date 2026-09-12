@@ -61,21 +61,35 @@ CONSERVED_ENERGY_ALIASES = (
 )
 
 
+class XvgParseError(ValueError):
+    """Malformed non-directive data in an .xvg file: a non-numeric field
+    or a ragged numeric table. A parse failure is a failing diagnostic,
+    never a silently-shortened series (audit IO-003)."""
+
+
+class ConservedEnergyColumnMissing(ValueError):
+    """A well-formed .xvg that carries none of the supported
+    conserved-energy labels — the one typed case that may become an
+    explicit not-applicable skip (audit IO-003)."""
+
+
 def load_preferred_energy(path):
     """Return (term_name, array) for the conserved-energy column.
 
     Only explicit, labeled columns are accepted — the documented alias set
     above (GROMACS spellings of the conserved energy and the total energy).
-    A file whose expected label is missing is an error, never a positional
-    fallback to the first data column: an arbitrary column (temperature,
-    box edge, pressure) is not a conserved quantity and silently drifts
-    the verdict (audit IO-002).
+    A file whose expected label is missing raises the typed
+    ConservedEnergyColumnMissing, never a positional fallback to the first
+    data column: an arbitrary column (temperature, box edge, pressure) is
+    not a conserved quantity and silently drifts the verdict (audit
+    IO-002). Malformed data raises XvgParseError and must fail, not skip
+    (audit IO-003).
     """
     cols = load_energy_xvg(path, column=None)
     for key in CONSERVED_ENERGY_ALIASES:
         if key in cols:
             return key, cols[key]
-    raise ValueError(
+    raise ConservedEnergyColumnMissing(
         f"{path}: no conserved-energy column labeled {list(CONSERVED_ENERGY_ALIASES)} "
         f"(found: {sorted(k for k in cols if k != 'time')})"
     )
@@ -94,10 +108,16 @@ def load_energy_xvg(path, *, column: int | None = 1):
     """Parse a GROMACS xmgrace .xvg energy file.
 
     column: 1-indexed data column to return (0 = x/time). None -> {legend: array}.
+
+    Malformed non-directive data is a parse error with line/column
+    context, never a silently-discarded row; every data row must carry
+    the same number of columns (audit IO-003).
     """
     legends: dict[int, str] = {}
     rows: list[list[float]] = []
-    for ln in Path(path).read_text().splitlines():
+    row_lines: list[int] = []
+    width = None
+    for lineno, ln in enumerate(Path(path).read_text().splitlines(), start=1):
         s = ln.strip()
         if not s or s.startswith("#"):
             continue
@@ -107,10 +127,24 @@ def load_energy_xvg(path, *, column: int | None = 1):
                 legends[int(m.group(1)) + 1] = m.group(2)
             continue
         parts = s.split()
-        try:
-            rows.append([float(x) for x in parts])
-        except ValueError:
-            continue
+        row = []
+        for col, token in enumerate(parts, start=1):
+            try:
+                row.append(float(token))
+            except ValueError:
+                raise XvgParseError(
+                    f"{path}: line {lineno} column {col}: non-numeric value {token!r} "
+                    "in a data row (directives start with @ or #)"
+                ) from None
+        if width is None:
+            width = len(row)
+        elif len(row) != width:
+            raise XvgParseError(
+                f"{path}: line {lineno}: ragged data row with {len(row)} columns "
+                f"(first data row, line {row_lines[0]}, has {width})"
+            )
+        rows.append(row)
+        row_lines.append(lineno)
     if not rows:
         raise ValueError(f"no numeric data in {path}")
     arr = np.array(rows, dtype=float)

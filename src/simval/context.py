@@ -178,11 +178,17 @@ class GromacsEngine(EngineAdapter):
         if xvg is not None:
             try:
                 term, arr = io.load_preferred_energy(xvg)
-            except ValueError as e:
-                # No labeled conserved-energy column: the energy check is
-                # explicitly not applicable, never silently run on an
-                # arbitrary positional column (audit IO-002).
+            except io.ConservedEnergyColumnMissing as e:
+                # A well-formed file with no labeled conserved-energy
+                # column: the energy check is explicitly not applicable,
+                # never silently run on an arbitrary positional column
+                # (audit IO-002). This is the ONLY typed skip (IO-003).
                 ctx.skipped["energy"] = str(e)[:160]
+            except Exception as e:
+                # Malformed data (non-numeric row, ragged table) must
+                # surface as a failing energy_drift diagnostic, never a
+                # skip (audit IO-003).
+                ctx.extra["energy_load_error"] = f"{type(e).__name__}: {e}"[:200]
             else:
                 ctx.energy = arr
                 ctx.run_params["energy_term"] = term
