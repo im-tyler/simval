@@ -11,6 +11,28 @@ from simval.result import DiagnosticResult
 
 SCHEMA = "simval.provenance.v1"
 
+# Volatile execution metadata: excluded from the canonical digest so two
+# identical verifications produce byte-identical canonical payloads even
+# though their wall-clock timestamps and timings differ (audit DET-001).
+VOLATILE_KEYS = ("created_at", "canonical_digest", "wall_s", "gen_wall_s", "verify_wall_s")
+
+
+def _strip_volatile(obj):
+    if isinstance(obj, dict):
+        return {k: _strip_volatile(v) for k, v in obj.items() if k not in VOLATILE_KEYS}
+    if isinstance(obj, list):
+        return [_strip_volatile(v) for v in obj]
+    return obj
+
+
+def canonical_digest(payload: dict) -> str:
+    """SHA-256 over the canonical JSON of a payload (sorted keys, tight
+    separators) after recursively stripping volatile execution metadata."""
+    import json as _json
+
+    blob = _json.dumps(_strip_volatile(payload), sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(blob).hexdigest()
+
 
 def compute_hashes(paths: Iterable, *, chunk: int = 1 << 16) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -35,10 +57,9 @@ def build_manifest(
 ) -> dict:
     verdict = all(r.passed for r in results) if results else False
     diagnostics = [r.to_dict() if isinstance(r, DiagnosticResult) else r for r in results]
-    return {
+    payload = {
         "schema": SCHEMA,
         "simval_version": __version__,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "verdict": "pass" if verdict else "fail",
         "params": params,
         "diagnostics": diagnostics,
@@ -46,6 +67,13 @@ def build_manifest(
         "image_digest": image_digest,
         "tier2_signed_off": bool(tier2_signed_off),
         "notes": notes,
+    }
+    # Volatile envelope (created_at) rides alongside; the digest covers
+    # only the canonical payload.
+    return {
+        **payload,
+        "canonical_digest": canonical_digest(payload),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
 
 

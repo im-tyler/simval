@@ -191,8 +191,21 @@ def main(argv=None) -> int:
         else:
             print("  outliers: none")
         if args.out:
+            from simval.manifest import canonical_digest
+
             Path(args.out).write_text(
-                json.dumps({"grid": args.grid, "runs": results, "outliers": ol}, indent=2) + "\n"
+                json.dumps(
+                    {
+                        "grid": args.grid,
+                        "runs": results,
+                        "outliers": ol,
+                        "canonical_digest": canonical_digest(
+                            {"runs": results, "outliers": ol}
+                        ),
+                    },
+                    indent=2,
+                )
+                + "\n"
             )
             print(f"  results -> {args.out}")
         clean = bool(results) and all(

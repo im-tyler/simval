@@ -217,3 +217,32 @@ def test_ontos_run_tracks_stream_and_meta_inputs(tmp_path):
     )
     ctx = select_engine(run).load_context(run, selection="default")
     assert {p.name for p in ctx.consumed_inputs} == {"ontos.stream", "ontos.json"}
+
+
+# --- DET-001: canonical digest independent of volatile execution metadata ---
+
+
+def test_identical_verifications_share_canonical_digest(tmp_path):
+    from simval.fixtures import make_run_dir
+    from simval.pipeline import diagnose
+
+    run = make_run_dir(tmp_path / "a", good=True, seed=7)
+    m1 = diagnose(run)
+    m2 = diagnose(run)  # identical verification, different created_at
+    assert m1["created_at"] is not None
+    assert m1["canonical_digest"] == m2["canonical_digest"]
+    from simval.manifest import canonical_digest
+
+    assert canonical_digest(m1) == m1["canonical_digest"]
+    m1["files"]["fake.npy"] = "0" * 64
+    assert canonical_digest(m1) != m1["canonical_digest"]
+
+
+def test_orchestrate_results_digest_ignores_wall_times():
+    from simval.manifest import canonical_digest
+
+    rows_a = [{"run": "x", "mismatch_count": 0, "wall_s": 1.5, "gen_wall_s": 0.2}]
+    rows_b = [{"run": "x", "mismatch_count": 0, "wall_s": 9.9, "gen_wall_s": 3.0}]
+    assert canonical_digest({"runs": rows_a}) == canonical_digest({"runs": rows_b})
+    rows_c = [{"run": "x", "mismatch_count": 1, "wall_s": 1.5}]
+    assert canonical_digest({"runs": rows_a}) != canonical_digest({"runs": rows_c})
