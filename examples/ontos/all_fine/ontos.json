@@ -1,1 +1,6 @@
-{"seed": 7}
+{
+  "events": [],
+  "mode": "life",
+  "seed": 7,
+  "ticks": 64
+}

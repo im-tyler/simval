@@ -1,1 +1,13 @@
-{"seed": 5, "observer": 777}
+{
+  "bodies": 10,
+  "contacts": false,
+  "events": [],
+  "mode": "gravity",
+  "multipole": true,
+  "observer": 777,
+  "radial": false,
+  "seed": 5,
+  "shells": false,
+  "ticks": 300,
+  "walls": false
+}

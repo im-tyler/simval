@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import struct
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from simval.ontos import MAGIC, fnv1a64, parse_stream
@@ -1648,14 +1649,179 @@ def parse_stream_v2(path):
     return (world_w, world_h, body_count), records
 
 
-def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
+@dataclass(frozen=True)
+class GravityContract:
+    """Immutable expected-run contract (audit ONT-001).
+
+    Built from the grid spec / ontos.json metadata of the *requested*
+    run — never from the candidate stream — and validated against the
+    stream before physics replay. Fields left None are not asserted
+    (legacy metadata carrying only a seed).
+    """
+
+    body_count: int | None = None
+    ticks: int | None = None
+    events: tuple | None = None  # None = not asserted; () = no events requested
+    contacts: bool | None = None
+    radial: bool | None = None
+    shells: bool | None = None
+    multipole: bool | None = None
+    restitution: float | None = None
+    friction: float | None = None
+    walls: bool | None = None
+    observer: int | None = None
+    test_ic: str | None = None
+
+    @classmethod
+    def from_metadata(cls, meta: dict) -> "GravityContract":
+        def opt_int(field, minimum):
+            v = meta.get(field)
+            if v is None:
+                return None
+            v = int(v)
+            if v < minimum:
+                raise ValueError(f"ontos.json {field} must be >= {minimum}, got {v}")
+            return v
+
+        def opt_float(field, low, high):
+            v = meta.get(field)
+            if v is None:
+                return None
+            v = float(v)
+            if not (math.isfinite(v) and low <= v <= high):
+                raise ValueError(f"ontos.json {field} must be finite in [{low},{high}], got {v}")
+            return v
+
+        def opt_bool(field):
+            v = meta.get(field)
+            return None if v is None else bool(v)
+
+        events = [] if "events" in meta else None
+        for ev in meta.get("events", []):
+            if len(ev) != 4:
+                raise ValueError(f"ontos.json events entries must be [t, rx, ry, level], got {list(ev)}")
+            t, rx, ry, level = int(ev[0]), int(ev[1]), int(ev[2]), int(ev[3])
+            if t < 1:
+                raise ValueError(f"ontos.json event tick must be >= 1, got {t}")
+            if rx not in (0, 1) or ry not in (0, 1):
+                raise ValueError(f"ontos.json event region ({rx},{ry}) outside the 2x2 grid")
+            if level not in (0, 1, 2):
+                raise ValueError(f"ontos.json event level {level} not in {{0,1,2}}")
+            events.append((t, ry * 2 + rx, level))
+        test_ic = meta.get("test_ic")
+        if test_ic is not None and test_ic not in ("wallshot", "coarsehit"):
+            raise ValueError(f"ontos.json test_ic {test_ic!r} not in ('wallshot', 'coarsehit')")
+        return cls(
+            body_count=opt_int("bodies", 1),
+            ticks=opt_int("ticks", 1),
+            events=None if events is None else tuple(events),
+            contacts=opt_bool("contacts"),
+            radial=opt_bool("radial"),
+            shells=opt_bool("shells"),
+            multipole=opt_bool("multipole"),
+            restitution=opt_float("restitution", 0.0, 1.0),
+            friction=opt_float("friction", 0.0, float("inf")),
+            walls=opt_bool("walls"),
+            observer=opt_int("observer", 0),
+            test_ic=test_ic,
+        )
+
+
+def verify_stream_gravity(path, seed: int, profile: str | None = None, *, expected: "GravityContract | None" = None) -> dict:
     (world_w, world_h, body_count), records = parse_stream_v2(path)
     if world_w != 128 or world_h != 128:
         raise ValueError(f"unsupported world size {world_w}x{world_h}")
+    mismatches = []
+
+    observed_events = []
+    _pending_scan = []
+    expected_last_tick = 0
+    for record in records:
+        if record[0] == "level":
+            _pending_scan.append((record[1], record[2], record[3]))
+        elif record[0] == "tick":
+            for rx, ry, lv in _pending_scan:
+                observed_events.append((record[1], ry * 2 + rx, lv))
+            _pending_scan.clear()
+            expected_last_tick = record[1]
+
+    # --- Contract validation (audit ONT-001), before physics replay ---
+    if expected is not None:
+        if expected.body_count is not None and body_count != expected.body_count:
+            mismatches.append(
+                {
+                    "tick": 0,
+                    "field": "contract_body_count",
+                    "expected": expected.body_count,
+                    "actual": body_count,
+                }
+            )
+        if expected.ticks is not None and expected_last_tick != expected.ticks:
+            mismatches.append(
+                {
+                    "tick": expected_last_tick,
+                    "field": "contract_ticks",
+                    "expected": expected.ticks,
+                    "actual": expected_last_tick,
+                }
+            )
+        if expected.test_ic is not None and profile is not None and expected.test_ic != profile:
+            mismatches.append(
+                {
+                    "tick": 0,
+                    "field": "contract_test_ic",
+                    "expected": expected.test_ic,
+                    "actual": profile,
+                }
+            )
+        if expected.events is not None:
+            from collections import Counter
+
+            want = Counter(expected.events)
+            got = Counter(observed_events)
+            for ev in sorted(want - got):
+                mismatches.append(
+                    {
+                        "tick": ev[0],
+                        "field": "contract_event",
+                        "expected": ev,
+                        "actual": None,
+                    }
+                )
+            if expected.observer is None:
+                for ev in sorted(got - want):
+                    mismatches.append(
+                        {
+                            "tick": ev[0],
+                            "field": "contract_unscheduled_event",
+                            "expected": None,
+                            "actual": ev,
+                        }
+                    )
+
     world = GravityWorld(seed, body_count, profile)
     reference = GravityWorld(seed, body_count, profile)
-
-    mismatches = []
+    if expected is not None:
+        # Feature modes come from the requested run, never from the
+        # presence of candidate records.
+        if expected.contacts:
+            world.contacts = True
+        if expected.radial:
+            world.radial_enabled = True
+        if expected.shells:
+            world.shells_enabled = True
+        if expected.restitution is not None:
+            world.contact_params = True
+            world.restitution = expected.restitution
+        if expected.friction is not None:
+            world.contact_params = True
+            world.friction = expected.friction
+        if expected.walls:
+            world.contacts = True
+            world.contact_params = True
+            world.walls = True
+        if expected.multipole is not None:
+            world.mp_enabled = expected.multipole
     compared = 0
     last_tick = 0
     pending = []
@@ -1665,6 +1831,7 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
     pending_radial = []
     pending_shells = []
     params_seen = False
+    stream_params = None
     max_pos_dev = 0.0
     post_exp_dev = 0.0
     collapse_events = 0
@@ -1672,6 +1839,7 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
     radial_events = 0
     shell_events = 0
     contact_events = 0
+    contact_records_seen = 0
     contact_worst_vn_after = 0.0
     contact_min_jn = float("inf")
     static_contact_events = 0
@@ -1732,12 +1900,18 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
                 world.friction = friction
                 world.walls = walls == 1
             params_seen = True
+            stream_params = (restitution, friction, walls)
         elif kind == "tick":
             _, tick = record
-            world.mp_enabled = bool(pending_multipole)
-            world.radial_enabled = world.radial_enabled or bool(pending_radial)
-            world.shells_enabled = world.shells_enabled or bool(pending_shells)
-            if pending_contact:
+            # Record-driven mode switches apply only when the contract
+            # does not pin the mode (audit ONT-001).
+            if expected is None or expected.multipole is None:
+                world.mp_enabled = bool(pending_multipole)
+            if expected is None or expected.radial is not False:
+                world.radial_enabled = world.radial_enabled or bool(pending_radial)
+            if expected is None or expected.shells is not False:
+                world.shells_enabled = world.shells_enabled or bool(pending_shells)
+            if pending_contact and (expected is None or expected.contacts is not False):
                 world.contacts = True
             for region, level in pending:
                 world.schedule(world.tick + 1, region, level)
@@ -1785,6 +1959,7 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
                                 "actual": (local["jn"], local["cx"], local["cy"]),
                             }
                         )
+            contact_records_seen += len(pending_contact)
             pending_contact = []
             for i in range(len(world.bodies)):
                 if world.body_collapsed[i] is not None:
@@ -2125,6 +2300,107 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
         end_e = subset_energy(wsub)
         ref_e0 = subset_energy(rsub)
     ref_scale = max(abs(ref_px), abs(ref_py), 1e-30)
+    # --- Contract validation, post-replay (audit ONT-001) ---
+    # Collected separately and prepended so contract violations (the root
+    # cause) survive the truncated first-20 mismatch detail.
+    contract_post = []
+    if expected is not None:
+        if expected.multipole is True and collapse_events > 0 and multipole_events != collapse_events:
+            contract_post.append(
+                {
+                    "tick": last_tick,
+                    "field": "contract_multipole_records",
+                    "expected": f"{collapse_events} RegionMultipole record(s) for {collapse_events} collapse(s)",
+                    "actual": multipole_events,
+                }
+            )
+        if expected.multipole is False and multipole_events > 0:
+            contract_post.append(
+                {
+                    "tick": last_tick,
+                    "field": "contract_multipole_records",
+                    "expected": 0,
+                    "actual": multipole_events,
+                }
+            )
+        for flag, count, kind in (
+            (expected.radial, radial_events, "radial"),
+            (expected.shells, shell_events, "shells"),
+        ):
+            if flag is True and collapse_events > 0 and count != collapse_events:
+                contract_post.append(
+                    {
+                        "tick": last_tick,
+                        "field": f"contract_{kind}_records",
+                        "expected": collapse_events,
+                        "actual": count,
+                    }
+                )
+            if flag is False and count > 0:
+                contract_post.append(
+                    {
+                        "tick": last_tick,
+                        "field": f"contract_{kind}_records",
+                        "expected": 0,
+                        "actual": count,
+                    }
+                )
+        stream_has_params = params_seen
+        if expected.contacts is False and (contact_records_seen > 0 or stream_has_params):
+            contract_post.append(
+                {
+                    "tick": last_tick,
+                    "field": "contract_contacts",
+                    "expected": "no contact records or ContactParams in a non-contact run",
+                    "actual": f"{contact_records_seen} contact record(s), params={stream_has_params}",
+                }
+            )
+        for field, want in (
+            ("restitution", expected.restitution),
+            ("friction", expected.friction),
+        ):
+            if want is None:
+                continue
+            if stream_params is None:
+                contract_post.append(
+                    {
+                        "tick": last_tick,
+                        "field": "contract_contact_params",
+                        "expected": f"{field}={want} requires a ContactParams record",
+                        "actual": None,
+                    }
+                )
+            elif struct.pack("<d", stream_params[0 if field == "restitution" else 1]) != struct.pack("<d", want):
+                contract_post.append(
+                    {
+                        "tick": last_tick,
+                        "field": "contract_contact_params",
+                        "expected": f"{field}={want}",
+                        "actual": stream_params[0 if field == "restitution" else 1],
+                    }
+                )
+        if expected.walls is True and stream_params is None:
+            contract_post.append(
+                {
+                    "tick": last_tick,
+                    "field": "contract_contact_params",
+                    "expected": "walls run must carry a ContactParams record with walls=1",
+                    "actual": None,
+                }
+            )
+        if stream_params is not None and expected.walls is not None:
+            want_byte = 1 if expected.walls else 0
+            if stream_params[2] != want_byte:
+                contract_post.append(
+                    {
+                        "tick": last_tick,
+                        "field": "contract_contact_params",
+                        "expected": f"walls={want_byte}",
+                        "actual": stream_params[2],
+                    }
+                )
+    if contract_post:
+        mismatches[0:0] = contract_post
     return {
         "ticks_verified": last_tick,
         "records_compared": compared,

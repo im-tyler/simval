@@ -1,1 +1,17 @@
-{"seed": 42}
+{
+  "events": [
+    [
+      "demote",
+      1,
+      0
+    ],
+    [
+      "demote",
+      0,
+      1
+    ]
+  ],
+  "mode": "life",
+  "seed": 42,
+  "ticks": 64
+}

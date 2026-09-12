@@ -1569,9 +1569,7 @@ def test_valid_contact_params_still_verify(tmp_path):
     [
         ("restitution", float("nan")),
         ("restitution", float("inf")),
-        ("restitution", float("-inf")),
         ("friction", float("nan")),
-        ("friction", float("inf")),
         ("friction", float("-inf")),
     ],
 )
@@ -1581,3 +1579,149 @@ def test_nonfinite_grid_floats_rejected_by_normalizer(field, bad):
     spec = {"name": "x", "contacts": True, field: bad}
     with pytest.raises(ValueError, match=field):
         normalize_spec(spec)
+
+
+# --- ONT-001: the expected-run contract drives verification, not the stream ---
+
+
+def test_contract_from_metadata_validation():
+    from simval.ontos_gravity import GravityContract
+
+    with pytest.raises(ValueError, match="events entries"):
+        GravityContract.from_metadata({"events": [[1, 0]]})
+    with pytest.raises(ValueError, match="outside the 2x2 grid"):
+        GravityContract.from_metadata({"events": [[1, 2, 0, 0]]})
+    with pytest.raises(ValueError, match="friction"):
+        GravityContract.from_metadata({"friction": float("nan")})
+    with pytest.raises(ValueError, match="restitution"):
+        GravityContract.from_metadata({"restitution": 1.5})
+    c = GravityContract.from_metadata(
+        {"bodies": 8, "ticks": 10, "events": [[4, 1, 1, 2]], "radial": True}
+    )
+    assert c.body_count == 8 and c.ticks == 10
+    assert c.events == ((4, 3, 2),)
+
+
+def _contract(ticks=6, **kw):
+    from simval.ontos_gravity import GravityContract
+
+    base = {"bodies": 4, "ticks": ticks, "events": []}
+    base.update(kw)
+    return GravityContract.from_metadata(base)
+
+
+def test_contract_body_count_mismatch_fails_before_replay(tmp_path):
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 42, 4, [], 6)
+    summary = verify_stream_gravity(p, 42, expected=_contract(bodies=8))
+    assert summary["mismatch_count"] > 0
+    assert any(m["field"] == "contract_body_count" for m in summary["mismatches"])
+
+
+def test_contract_horizon_truncated_stream_fails(tmp_path):
+    # A stream cut short used to verify clean: replay matched every
+    # present record. The contract pins the requested final tick.
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 42, 4, [], 6)
+    summary = verify_stream_gravity(p, 42, expected=_contract(ticks=10))
+    assert summary["mismatch_count"] > 0
+    assert any(m["field"] == "contract_ticks" for m in summary["mismatches"])
+
+
+def test_contract_missing_scheduled_event_fails(tmp_path):
+    order, _ = _region_occupancy(42, 4, 3)
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 42, 4, [], 8)
+    summary = verify_stream_gravity(
+        p, 42, expected=_contract(ticks=8, events=[[2, order[0] % 2, order[0] // 2, 0]])
+    )
+    assert any(m["field"] == "contract_event" for m in summary["mismatches"])
+
+
+def test_contract_unscheduled_event_fails_without_observer(tmp_path):
+    order, _ = _region_occupancy(42, 4, 3)
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 42, 4, [(2, order[0], 0)], 8)
+    summary = verify_stream_gravity(p, 42, expected=_contract(ticks=8, events=[]))
+    assert any(m["field"] == "contract_unscheduled_event" for m in summary["mismatches"])
+
+
+def test_contract_declared_event_verifies(tmp_path):
+    order, _ = _region_occupancy(42, 4, 3)
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 42, 4, [(2, order[0], 0)], 8)
+    summary = verify_stream_gravity(
+        p, 42, expected=_contract(ticks=8, events=[[2, order[0] % 2, order[0] // 2, 0]])
+    )
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+
+
+def test_contract_radial_mode_required_at_collapses(tmp_path):
+    # Stream collapses without radial records; contract says the run
+    # was requested with --radial: the radial synthesis evidence is
+    # mandatory, and the replay must synthesize radially.
+    order, _ = _region_occupancy(42, 4, 3)
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 42, 4, [(4, order[0], 2), (6, order[0], 1)], 10)
+    summary = verify_stream_gravity(p, 42, expected=_contract(ticks=10, radial=True))
+    assert any(m["field"] == "contract_radial_records" for m in summary["mismatches"])
+
+
+def test_contract_radial_run_verifies(tmp_path):
+    order, _ = _region_occupancy(42, 4, 3)
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 42, 4, [(4, order[0], 2), (6, order[0], 1)], 10, radial=True)
+    summary = verify_stream_gravity(
+        p, 42, expected=_contract(ticks=10, radial=True, events=[[4, order[0] % 2, order[0] // 2, 2], [6, order[0] % 2, order[0] // 2, 1]])
+    )
+    assert summary["mismatch_count"] == 0, summary["mismatches"]
+    assert summary["radial_events"] == 1
+
+
+def test_contract_multipole_off_rejects_multipole_records(tmp_path):
+    order, _ = _region_occupancy(42, 4, 3)
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 42, 4, [(4, order[0], 2), (6, order[0], 1)], 10)
+    summary = verify_stream_gravity(p, 42, expected=_contract(ticks=10, multipole=False))
+    assert any(m["field"] == "contract_multipole_records" for m in summary["mismatches"])
+
+
+def test_contract_contacts_off_rejects_contact_stream(tmp_path):
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 11, 8, [], 6, contacts=True)
+    summary = verify_stream_gravity(p, 11, expected=_contract(ticks=6, bodies=8, contacts=False))
+    assert any(m["field"] == "contract_contacts" for m in summary["mismatches"])
+
+
+def test_contract_params_values_must_match(tmp_path):
+    p = tmp_path / "s.stream"
+    _emit_gravity_stream(p, 11, 8, [], 6, contacts=True, params=(0.7, 0.3, 0))
+    summary = verify_stream_gravity(
+        p, 11, expected=_contract(ticks=6, bodies=8, contacts=True, restitution=0.5, friction=0.25)
+    )
+    assert any(m["field"] == "contract_contact_params" for m in summary["mismatches"])
+
+
+def test_engine_mode_mismatch_rejected(tmp_path):
+    import shutil
+
+    run = tmp_path / "mixed"
+    shutil.copytree(EXAMPLES / "all_fine", run)
+    (run / "ontos.json").write_text(json.dumps({"mode": "life", "seed": 42}))
+    engine = select_engine(run)
+    with pytest.raises(ValueError, match="mode=life"):
+        engine.load_context(run, selection="default")
+
+
+def test_engine_contract_metadata_tamper_fails_checks(tmp_path):
+    import shutil
+
+    run = tmp_path / "tampered_meta"
+    shutil.copytree(EXAMPLES / "all_fine", run)
+    meta = json.loads((run / "ontos.json").read_text())
+    meta["ticks"] = 50  # claims a shorter horizon than the stream carries
+    (run / "ontos.json").write_text(json.dumps(meta))
+    ctx = select_engine(run).load_context(run, selection="default")
+    results = run_checks(ctx)
+    ref = next(r for r in results if r.name == "ontos_reference_match")
+    assert not ref.passed

@@ -166,16 +166,27 @@ def normalize_spec(spec: dict, index: int = 0) -> dict:
 
 
 def _ontos_json(spec: dict) -> dict:
+    """The run contract artifact: every CLI-affecting field is persisted so
+    the verifier can check the stream against what was requested (ONT-001)."""
     meta = {"mode": spec["mode"], "seed": spec["seed"], "ticks": spec["ticks"]}
     if spec["mode"] == "gravity":
         meta["bodies"] = spec["bodies"]
         meta["events"] = [
             [t, rx, ry, GRAVITY_EVENT_LEVELS[kind]] for kind, t, rx, ry in spec["events"]
         ]
+        meta["contacts"] = spec["contacts"]
+        meta["radial"] = spec["radial"]
+        meta["shells"] = spec["shells"]
+        meta["walls"] = spec["walls"]
+        meta["multipole"] = True  # the ontos CLI default (spec section 20)
         if spec["observer"] is not None:
             meta["observer"] = spec["observer"]
-        if spec["contacts"]:
-            meta["contacts"] = True
+        if spec["restitution"] is not None:
+            meta["restitution"] = spec["restitution"]
+        if spec["friction"] is not None:
+            meta["friction"] = spec["friction"]
+    else:
+        meta["events"] = [[kind, rx, ry] for kind, rx, ry in spec["events"]]
     return meta
 
 

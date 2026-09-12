@@ -1,1 +1,12 @@
-{"seed": 42}
+{
+  "bodies": 8,
+  "contacts": false,
+  "events": [],
+  "mode": "gravity",
+  "multipole": true,
+  "radial": false,
+  "seed": 42,
+  "shells": false,
+  "ticks": 100,
+  "walls": false
+}

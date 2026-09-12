@@ -1,1 +1,15 @@
-{"seed": 3, "test_ic": "wallshot"}
+{
+  "bodies": 16,
+  "contacts": true,
+  "events": [],
+  "friction": 0.3,
+  "mode": "gravity",
+  "multipole": true,
+  "radial": false,
+  "restitution": 0.7,
+  "seed": 3,
+  "shells": false,
+  "test_ic": "wallshot",
+  "ticks": 800,
+  "walls": true
+}

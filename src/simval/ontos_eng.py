@@ -13,7 +13,8 @@ from pathlib import Path
 
 from simval.context import EngineAdapter, RunContext, register_engine
 from simval.ontos import verify_stream
-from simval.ontos_gravity import verify_stream_gravity
+from simval.ontos_gravity import GravityContract, verify_stream_gravity
+from simval.result import DiagnosticResult
 
 
 def _is_gravity(run: Path) -> bool:
@@ -22,6 +23,46 @@ def _is_gravity(run: Path) -> bool:
     if len(header) < 8 or header[:4] != b"ONTO":
         return False
     return struct.unpack("<I", header[4:8])[0] == 2
+
+
+_LIFE_EVENT_LEVELS = {"demote": 0, "promote": 1}
+
+
+def _life_contract_check(meta: dict, summary: dict, records: list) -> DiagnosticResult | None:
+    """Validate a life run's metadata (mode/ticks/events) against the stream."""
+    problems = []
+    meta_ticks = meta.get("ticks")
+    if meta_ticks is not None and int(meta_ticks) != summary["ticks_verified"]:
+        problems.append(
+            f"ontos.json ticks={meta_ticks} but stream verified {summary['ticks_verified']} ticks"
+        )
+    if "events" in meta:
+        from collections import Counter
+
+        want = Counter()
+        for ev in meta["events"]:
+            if len(ev) != 3 or ev[0] not in _LIFE_EVENT_LEVELS:
+                problems.append(f"ontos.json life events must be [kind, rx, ry], got {list(ev)}")
+                continue
+            kind, rx, ry = ev[0], int(ev[1]), int(ev[2])
+            if rx not in (0, 1) or ry not in (0, 1):
+                problems.append(f"ontos.json life event region ({rx},{ry}) outside the 2x2 grid")
+                continue
+            want[(rx, ry, _LIFE_EVENT_LEVELS[kind])] += 1
+        got = Counter((r[1], r[2], r[3]) for r in records if r[0] == "level")
+        for key in sorted((want - got).elements()):
+            problems.append(f"missing scheduled event {key}")
+        for key in sorted((got - want).elements()):
+            problems.append(f"unscheduled event {key} in stream")
+    if not problems:
+        return None
+    return DiagnosticResult(
+        name="ontos_run_contract",
+        passed=False,
+        threshold=0.0,
+        value=float(len(problems)),
+        detail={"problems": problems[:10]},
+    )
 
 
 class OntosEngine(EngineAdapter):
@@ -35,8 +76,14 @@ class OntosEngine(EngineAdapter):
         if "seed" not in meta:
             raise ValueError("ontos.json must contain an integer 'seed'")
         seed = int(meta["seed"])
+        gravity_stream = _is_gravity(run)
+        declared = meta.get("mode")
+        if declared == "gravity" and not gravity_stream:
+            raise ValueError("ontos.json declares mode=gravity but ontos.stream is version 1")
+        if declared == "life" and gravity_stream:
+            raise ValueError("ontos.json declares mode=life but ontos.stream is version 2")
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
-        if _is_gravity(run):
+        if gravity_stream:
             from simval.ontos_gravity import (
                 check_collapse_energy,
                 check_contact_resolution,
@@ -49,7 +96,10 @@ class OntosEngine(EngineAdapter):
                 verify_stream_gravity,
             )
 
-            summary = verify_stream_gravity(run / "ontos.stream", seed, meta.get("test_ic"))
+            expected = GravityContract.from_metadata(meta)
+            summary = verify_stream_gravity(
+                run / "ontos.stream", seed, meta.get("test_ic"), expected=expected
+            )
             extra_checks = []
             if summary.get("collapse_events", 0) or summary.get("expand_events", 0):
                 extra_checks.append(check_reconstruction_error(summary))
@@ -99,7 +149,14 @@ class OntosEngine(EngineAdapter):
             }
         else:
             summary = verify_stream(run / "ontos.stream", seed)
-            ctx.extra = {"ontos_summary": summary}
+            extra_checks = []
+            from simval.ontos import parse_stream as parse_v1
+
+            _, records = parse_v1(run / "ontos.stream")
+            contract = _life_contract_check(meta, summary, records)
+            if contract is not None:
+                extra_checks.append(contract)
+            ctx.extra = {"ontos_summary": summary, "ontos_extra_checks": extra_checks}
             ctx.run_params = {
                 "engine": self.name,
                 "mode": "life",

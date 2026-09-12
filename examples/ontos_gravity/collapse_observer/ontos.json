@@ -1,1 +1,20 @@
-{"seed": 13, "observer": 42, "events": [[40, 0, 0, 2]]}
+{
+  "bodies": 12,
+  "contacts": false,
+  "events": [
+    [
+      40,
+      0,
+      0,
+      2
+    ]
+  ],
+  "mode": "gravity",
+  "multipole": false,
+  "observer": 42,
+  "radial": false,
+  "seed": 13,
+  "shells": false,
+  "ticks": 300,
+  "walls": false
+}

@@ -158,3 +158,50 @@ def test_outliers_ignores_error_rows():
 
 def test_outliers_needs_population():
     assert outliers([_gravity_row("a")]) == []
+
+
+# --- ONT-001: the orchestrator persists every CLI-affecting field ---
+
+
+def test_ontos_json_persists_full_contract():
+    from simval.orchestrate import _ontos_json, normalize_spec
+
+    spec = normalize_spec(
+        {
+            "name": "full",
+            "mode": "gravity",
+            "ticks": 40,
+            "seed": 11,
+            "bodies": 16,
+            "events": [["collapse-at", 6, 1, 1], ["expand-at", 30, 1, 1]],
+            "observer": 777,
+            "contacts": True,
+            "radial": True,
+            "restitution": 0.5,
+            "friction": 0.25,
+        }
+    )
+    meta = _ontos_json(spec)
+    assert meta["mode"] == "gravity"
+    assert meta["seed"] == 11 and meta["ticks"] == 40 and meta["bodies"] == 16
+    assert meta["events"] == [[6, 1, 1, 2], [30, 1, 1, 1]]
+    assert meta["observer"] == 777
+    assert meta["contacts"] is True and meta["radial"] is True
+    assert meta["shells"] is False and meta["walls"] is False
+    assert meta["multipole"] is True
+    assert meta["restitution"] == 0.5 and meta["friction"] == 0.25
+    # round-trips through the gravity contract parser
+    from simval.ontos_gravity import GravityContract
+
+    contract = GravityContract.from_metadata(meta)
+    assert contract.body_count == 16 and contract.ticks == 40
+    assert contract.events == ((6, 3, 2), (30, 3, 1))
+
+
+def test_ontos_json_life_events_persisted():
+    from simval.orchestrate import _ontos_json, normalize_spec
+
+    spec = normalize_spec({"name": "l", "mode": "life", "events": [["demote", 1, 0]]})
+    meta = _ontos_json(spec)
+    assert meta["mode"] == "life"
+    assert meta["events"] == [["demote", 1, 0]]

@@ -1,6 +1,7 @@
 """Ontos adapter tests: independent reference vs recorded streams."""
 from __future__ import annotations
 
+import json
 import struct
 from pathlib import Path
 
@@ -296,3 +297,50 @@ def test_reference_match_fails_on_zero_compared_records():
     assert not check_reference_match(summary).passed
     summary = {"mismatch_count": 0, "records_compared": 5, "ticks_verified": 1, "mismatches": []}
     assert check_reference_match(summary).passed
+
+
+# --- ONT-001: life-mode run contract from ontos.json metadata ---
+
+
+def _life_run(tmp_path, meta):
+    import shutil
+
+    run = tmp_path / "ontos_run"
+    if run.exists():
+        shutil.rmtree(run)
+    shutil.copytree(R_PENTOMINO, run)
+    merged = json.loads((run / "ontos.json").read_text())
+    merged.update(meta)
+    if "events" in meta:
+        merged["events"] = meta["events"]
+    (run / "ontos.json").write_text(json.dumps(merged))
+    return run
+
+
+def test_life_contract_verifies(tmp_path):
+    run = _life_run(
+        tmp_path,
+        {"mode": "life", "ticks": 64, "events": [["demote", 1, 0], ["demote", 0, 1]]},
+    )
+    ctx = OntosEngine().load_context(run, selection="default")
+    results = run_checks(ctx)
+    names = [r.name for r in results]
+    assert "ontos_run_contract" not in names or all(
+        r.passed for r in results if r.name == "ontos_run_contract"
+    )
+
+
+def test_life_contract_wrong_ticks_fails(tmp_path):
+    run = _life_run(tmp_path, {"mode": "life", "ticks": 32, "events": []})
+    ctx = OntosEngine().load_context(run, selection="default")
+    results = run_checks(ctx)
+    contract = next((r for r in results if r.name == "ontos_run_contract"), None)
+    assert contract is not None and not contract.passed
+
+
+def test_life_contract_event_mismatch_fails(tmp_path):
+    run = _life_run(tmp_path, {"mode": "life", "ticks": 64, "events": [["promote", 0, 0]]})
+    ctx = OntosEngine().load_context(run, selection="default")
+    results = run_checks(ctx)
+    contract = next((r for r in results if r.name == "ontos_run_contract"), None)
+    assert contract is not None and not contract.passed

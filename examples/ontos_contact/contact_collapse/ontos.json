@@ -1,1 +1,25 @@
-{"seed": 11}
+{
+  "bodies": 32,
+  "contacts": true,
+  "events": [
+    [
+      100,
+      0,
+      0,
+      2
+    ],
+    [
+      250,
+      0,
+      0,
+      1
+    ]
+  ],
+  "mode": "gravity",
+  "multipole": true,
+  "radial": false,
+  "seed": 11,
+  "shells": false,
+  "ticks": 400,
+  "walls": false
+}
