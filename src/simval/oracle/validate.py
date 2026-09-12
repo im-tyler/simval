@@ -287,6 +287,39 @@ def _within(kind, candidate, reference, tol):
     raise ValueError(f"unknown tolerance kind: {kind}")
 
 
+def _validate_tolerance_spec(metric: str, spec) -> None:
+    """Externally supplied comparison rules must be well-formed and bounded
+    (audit ORA-004): known kind, finite numeric operands, positive tolerances,
+    ordered intervals. An inf/NaN operand would make the rule vacuous."""
+    kinds = ("exact", "abs", "rel", "max", "min", "interval")
+    if not isinstance(spec, (list, tuple)) or not spec or spec[0] not in kinds:
+        raise ValueError(
+            f"tolerance rule for {metric!r} must be [kind, ...] with kind in {kinds}, got {spec!r}"
+        )
+    kind = spec[0]
+
+    def _num(v, what):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise ValueError(f"tolerance rule for {metric!r}: {what} must be a finite number, got {v!r}")
+        return float(v)
+
+    if kind == "exact":
+        if len(spec) != 1:
+            raise ValueError(f"tolerance rule for {metric!r}: 'exact' takes no operand, got {spec!r}")
+    elif kind == "interval":
+        if len(spec) != 3:
+            raise ValueError(f"tolerance rule for {metric!r}: 'interval' needs [interval, lo, hi], got {spec!r}")
+        lo, hi = _num(spec[1], "interval lo"), _num(spec[2], "interval hi")
+        if not lo < hi:
+            raise ValueError(f"tolerance rule for {metric!r}: interval lo must be < hi, got [{lo}, {hi}]")
+    else:
+        if len(spec) != 2:
+            raise ValueError(f"tolerance rule for {metric!r}: {kind!r} needs exactly one operand, got {spec!r}")
+        tol = _num(spec[1], f"{kind} bound")
+        if kind in ("abs", "rel") and tol <= 0:
+            raise ValueError(f"tolerance rule for {metric!r}: {kind!r} tolerance must be positive, got {tol}")
+
+
 def compare_metrics(
     candidate: dict,
     reference: dict,
@@ -307,6 +340,8 @@ def compare_metrics(
         stale = sorted(set(tolerances) - set(reference))
         if stale:
             raise ValueError(f"tolerances configured for unknown reference metrics: {stale}")
+        for metric, spec in tolerances.items():
+            _validate_tolerance_spec(metric, spec)
         tols.update(tolerances)
     out: dict = {}
     all_pass = True

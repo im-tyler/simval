@@ -131,3 +131,34 @@ def test_interval_and_min_bounds():
     assert not compare_metrics({"tau": 0.3}, {"tau": 0.8}, {"tau": ["interval", 0.5, 2.0]})["tau"]["passed"]
     assert compare_metrics({"p": 0.9999}, {"p": 0.9999}, {"p": ["min", 0.9]})["p"]["passed"]
     assert not compare_metrics({"p": 0.5}, {"p": 0.9999}, {"p": ["min", 0.9]})["p"]["passed"]
+
+
+# --- ORA-004: tolerance rules are externally supplied too ---
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        ["abs", float("inf")],
+        ["abs", float("nan")],
+        ["abs", 0.0],
+        ["abs", -1.0],
+        ["rel", float("inf")],
+        ["max", float("inf")],
+        ["min", float("nan")],
+        ["interval", 0.5, float("inf")],
+        ["interval", 2.0, 0.5],
+        ["exact", 1.0],
+        ["vacuous", 1.0],
+        ["abs"],
+        ["abs", 1.0, 2.0],
+    ],
+)
+def test_malformed_tolerance_rules_rejected(spec):
+    with pytest.raises(ValueError, match="tolerance rule"):
+        compare_metrics({"m": 1.0}, {"m": 1.0}, {"m": spec})
+
+
+def test_wellformed_tolerance_rules_accepted():
+    assert compare_metrics({"m": 1.0}, {"m": 1.0}, {"m": ["abs", 0.5]})["__passed__"]
+    assert compare_metrics({"m": 1.0}, {"m": 1.0}, {"m": ["interval", 0.0, 2.0]})["__passed__"]

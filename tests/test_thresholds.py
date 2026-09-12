@@ -22,3 +22,43 @@ def test_thresholds_json_in_run_dir(tmp_path):
     m = diagnose(run, selection="protein")
     by_name = {d["name"]: d for d in m["diagnostics"]}
     assert by_name["energy_drift"]["threshold"] == 10.0
+
+
+# --- ORA-004: externally supplied thresholds must be finite/positive/bounded ---
+
+
+import pytest  # noqa: E402
+
+from simval.thresholds import load as load_thresholds  # noqa: E402
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf"), 0.0, -1.0, 1e9])
+def test_bad_override_thresholds_rejected(bad):
+    with pytest.raises(ValueError, match="threshold 'energy_drift'"):
+        load_thresholds(None, {"energy_drift": bad})
+
+
+def test_nan_thresholds_json_rejected(tmp_path):
+    # JSON parses the NaN literal into a float; it must not reach any check.
+    run = make_run_dir(tmp_path / "good", good=True)
+    (run / "thresholds.json").write_text('{"energy_drift": NaN}')
+    with pytest.raises(ValueError, match="must be finite"):
+        diagnose(run, selection="protein")
+
+
+def test_infinity_cli_override_rejected(tmp_path):
+    run = make_run_dir(tmp_path / "good", good=True)
+    with pytest.raises(ValueError, match="finite"):
+        diagnose(run, selection="protein", thresholds={"rmsd_plateau": float("inf")})
+
+
+def test_non_numeric_threshold_rejected():
+    with pytest.raises(ValueError, match="must be a number"):
+        load_thresholds(None, {"energy_drift": "loose"})
+
+
+def test_thresholds_file_must_be_object(tmp_path):
+    run = make_run_dir(tmp_path / "good", good=True)
+    (run / "thresholds.json").write_text("[1, 2]")
+    with pytest.raises(ValueError, match="JSON object"):
+        diagnose(run, selection="protein")
