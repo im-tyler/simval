@@ -1726,11 +1726,12 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None) -> dict:
                         "actual": record,
                     }
                 )
+            else:
+                world.contact_params = True
+                world.restitution = restitution
+                world.friction = friction
+                world.walls = walls == 1
             params_seen = True
-            world.contact_params = True
-            world.restitution = restitution
-            world.friction = friction
-            world.walls = walls == 1
         elif kind == "tick":
             _, tick = record
             world.mp_enabled = bool(pending_multipole)
