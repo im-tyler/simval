@@ -322,7 +322,9 @@ def main(argv=None) -> int:
               f"{result.detail['n_checked']} metrics, {result.detail['n_failed']} drifted")
         for name, m in result.detail["metrics"].items():
             flag = "ok" if m["passed"] else "DRIFT"
-            print(f"  [{flag}] {name:<24} ref={m['reference']:.4g} cand={m['candidate']:.4g} "
-                  f"drel={m['delta_rel']:.3g} ({m['tol_kind']})")
+            cand = "-" if m["candidate"] is None else f"{m['candidate']:.4g}"
+            drel = "-" if m["delta_rel"] is None else f"{m['delta_rel']:.3g}"
+            print(f"  [{flag}] {name:<24} ref={m['reference']:.4g} cand={cand} "
+                  f"drel={drel} ({m['tol_kind']})")
         return 0 if result.passed else 1
     return 0

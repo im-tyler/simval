@@ -172,10 +172,14 @@ def _pyscf_metrics(run: Path) -> dict:
     from simval.pyscf_eng import PyscfEngine
 
     ctx = PyscfEngine().load_context(run, "n/a")
+    energies = ctx.extra["scf_energies"]
+    last_delta = abs(energies[-1] - energies[-2]) if len(energies) >= 2 else 0.0
     return {
         "final_energy_hartree": float(ctx.extra["final_energy"]),
         "converged": 1.0 if ctx.extra["converged"] else 0.0,
         "n_electrons": int(ctx.extra["n_electrons"]),
+        "n_cycles": len(energies),
+        "scf_last_delta": float(last_delta),
     }
 
 
@@ -184,10 +188,17 @@ def _qiskit_metrics(run: Path) -> dict:
 
     ctx = QiskitEngine().load_context(run, "n/a")
     nm = check_norm_conservation(ctx.extra["statevector"])
-    return {
+    metrics = {
         "norm_drift": float(nm.value),
         "n_qubits": int(ctx.extra["n_qubits"]),
     }
+    expected = ctx.extra.get("expected_probabilities")
+    if expected:
+        probs = ctx.extra["probabilities"]
+        keys = sorted(set(probs) | set(expected))
+        tv = 0.5 * sum(abs(float(probs.get(k, 0.0)) - float(expected.get(k, 0.0))) for k in keys)
+        metrics["tv_distance"] = float(tv)
+    return metrics
 
 
 def _kinetics_metrics(run: Path) -> dict:
@@ -224,13 +235,33 @@ def _relativistic_metrics(run: Path) -> dict:
 
 
 _DEFAULT_TOLERANCES = {
+    # Count-like and version-like fields: exact match, always.
     "n_selected_atoms": ("exact",),
+    "n_frames": ("exact",),
+    "n_steps": ("exact",),
+    "n_samples": ("exact",),
+    "n_electrons": ("exact",),
+    "n_qubits": ("exact",),
+    "n_cycles": ("exact",),
+    "n_gates": ("exact",),
+    "converged": ("exact",),
+    "tau_in_range": ("exact",),
+    # Physical quantities: delta tolerances against the reference value.
     "mean_rmsd_nm": ("rel", 0.10),
     "final_rmsd_nm": ("rel", 0.10),
     "rmsd_tail_drift_fraction": ("rel", 0.25),
     "mean_rg_nm": ("rel", 0.02),
     "final_rg_nm": ("rel", 0.03),
     "energy_relative_range": ("rel", 0.25),
+    "energy_drift": ("rel", 0.10),
+    "gamma_drift": ("abs", 1e-9),
+    "mass_balance_drift": ("abs", 1e-9),
+    "norm_drift": ("abs", 1e-9),
+    "tv_distance": ("abs", 1e-9),
+    "deltaG": ("abs", 2.0),
+    "overlap_min_eig": ("abs", 0.05),
+    "final_energy_hartree": ("abs", 1e-6),
+    "scf_last_delta": ("abs", 1e-6),
 }
 
 
@@ -245,15 +276,57 @@ def _within(kind, candidate, reference, tol):
     raise ValueError(f"unknown tolerance kind: {kind}")
 
 
-def compare_metrics(candidate: dict, reference: dict, tolerances: dict | None = None) -> dict:
-    """Pure comparison. Returns {metric: {ref, candidate, delta, passed}} + overall 'passed'."""
+def compare_metrics(
+    candidate: dict,
+    reference: dict,
+    tolerances: dict | None = None,
+    *,
+    ignore: list[str] | None = None,
+) -> dict:
+    """Pure comparison. Returns {metric: {ref, candidate, delta, passed}} + overall 'passed'.
+
+    Every reference metric is mandatory: a metric missing from the candidate
+    fails the comparison, and a metric with no comparison policy is a hard
+    configuration error. The only exemption is an explicit per-case `ignore`
+    list (empty by default).
+    """
+    ignore_set = set(ignore or ())
     tols = dict(_DEFAULT_TOLERANCES)
     if tolerances:
+        stale = sorted(set(tolerances) - set(reference))
+        if stale:
+            raise ValueError(f"tolerances configured for unknown reference metrics: {stale}")
         tols.update(tolerances)
     out: dict = {}
     all_pass = True
     for metric, ref_val in reference.items():
-        if metric not in candidate or metric not in tols:
+        if metric in ignore_set:
+            out[metric] = {
+                "reference": ref_val,
+                "candidate": None,
+                "delta_rel": None,
+                "tol_kind": "ignore",
+                "tol": None,
+                "passed": True,
+                "ignored": True,
+            }
+            continue
+        if metric not in tols:
+            raise ValueError(
+                f"reference metric {metric!r} has no comparison policy; "
+                "add a tolerance rule or declare it in the case's ignore list"
+            )
+        if metric not in candidate:
+            out[metric] = {
+                "reference": ref_val,
+                "candidate": None,
+                "delta_rel": None,
+                "tol_kind": tols[metric][0],
+                "tol": tols[metric][1] if len(tols[metric]) > 1 else None,
+                "passed": False,
+                "error": "missing from candidate",
+            }
+            all_pass = False
             continue
         kind = tols[metric][0]
         cand_val = candidate[metric]
@@ -295,7 +368,9 @@ def validate(run_dir, case: ReferenceCase | str, *, selection: str | None = None
         )
     sel = selection or case.selection
     candidate = compute_metrics(run_dir, selection=sel)
-    compared = compare_metrics(candidate, case.reference_metrics, case.tolerances)
+    compared = compare_metrics(
+        candidate, case.reference_metrics, case.tolerances, ignore=case.ignore
+    )
     passed = compared.pop("__passed__")
     n_checked = len(compared)
     n_failed = sum(1 for v in compared.values() if not v["passed"])
