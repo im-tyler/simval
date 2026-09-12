@@ -1774,3 +1774,109 @@ def test_module_cli_gravity_contract_flags_catch_horizon_lie(tmp_path, capsys):
     assert rc == 1
     out = capsys.readouterr().out
     assert "contract_ticks" in out
+
+
+# --- ONT-008: event multiplicity enforced for observer runs ---
+
+
+def _level_record_offsets(data: bytes):
+    sizes = {1: 9, 2: 9, 3: 17, 4: 10, 5: 34, 6: 55, 7: 57, 8: 73, 9: 57,
+             10: 41, 11: 25, 12: 18, 13: 57}
+    off = 20
+    offsets = []
+    while off < len(data):
+        tag = data[off]
+        offsets.append((off, tag))
+        off += sizes[tag]
+    return offsets
+
+
+def test_observer_duplicate_requested_event_fails_contract(tmp_path):
+    # Duplicate the CLI collapse event record: membership-set comparison
+    # let it pass; the multiset contract must reject it.
+    import shutil
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(EXAMPLES / "collapse_observer", run)
+    data = bytearray((run / "ontos.stream").read_bytes())
+    level_offsets = [off for off, tag in _level_record_offsets(bytes(data)) if tag == 4]
+    assert level_offsets
+    rec = bytes(data[level_offsets[0] : level_offsets[0] + 10])
+    dup = bytes(data[: level_offsets[0]]) + rec + bytes(data[level_offsets[0]:])
+    (run / "ontos.stream").write_bytes(dup)
+
+    from simval.context import select_engine
+    from simval.pipeline import run_checks as rc
+
+    ctx = select_engine(run).load_context(run, selection="default")
+    results = rc(ctx)
+    ref = next(r for r in results if r.name == "ontos_reference_match")
+    assert not ref.passed
+    assert any(
+        m["field"] == "contract_unscheduled_event"
+        for m in ref.detail["first_mismatches"]
+    )
+
+
+def test_observer_duplicate_policy_event_fails(tmp_path):
+    import shutil
+
+    from simval.ontos_gravity import check_zoom_policy, parse_stream_v2
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(EXAMPLES / "observer", run)
+    data = bytearray((run / "ontos.stream").read_bytes())
+    level_offsets = [off for off, tag in _level_record_offsets(bytes(data)) if tag == 4]
+    assert level_offsets
+    rec = bytes(data[level_offsets[0] : level_offsets[0] + 10])
+    dup = bytes(data[: level_offsets[0]]) + rec + bytes(data[level_offsets[0]:])
+    (run / "ontos.stream").write_bytes(dup)
+    _, records = parse_stream_v2(run / "ontos.stream")
+    result = check_zoom_policy(records, 5, 777)
+    assert not result.passed
+    assert result.detail["unexpected"]
+
+
+def test_observer_clean_run_event_multiset_matches(tmp_path):
+    import shutil
+
+    from simval.ontos_gravity import check_zoom_policy, parse_stream_v2
+
+    for name, seed, offset in (("observer", 5, 777), ("collapse_observer", 13, 42)):
+        _, records = parse_stream_v2(EXAMPLES / name / "ontos.stream")
+        meta = json.loads((EXAMPLES / name / "ontos.json").read_text())
+        cli = [(int(t), ry * 2 + rx, int(lv)) for t, rx, ry, lv in meta.get("events", [])]
+        result = check_zoom_policy(records, seed, offset, cli_events=cli)
+        assert result.passed, (name, result.detail)
+
+
+def test_contract_observer_without_ticks_rejected():
+    from simval.ontos_gravity import GravityContract
+
+    with pytest.raises(ValueError, match="observer runs must carry ticks"):
+        GravityContract.from_metadata({"observer": 777, "bodies": 8})
+
+
+def test_observer_duplicate_event_fails_zoom_contract_in_verifier(tmp_path):
+    # End-to-end through verify_stream_gravity with the metadata contract:
+    # a duplicated RegionLevel record must produce a contract mismatch.
+    import shutil
+
+    from simval.ontos_gravity import GravityContract, verify_stream_gravity
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(EXAMPLES / "collapse_observer", run)
+    data = bytearray((run / "ontos.stream").read_bytes())
+    level_offsets = [off for off, tag in _level_record_offsets(bytes(data)) if tag == 4]
+    rec = bytes(data[level_offsets[0] : level_offsets[0] + 10])
+    (run / "ontos.stream").write_bytes(
+        bytes(data[: level_offsets[0]]) + rec + bytes(data[level_offsets[0]:])
+    )
+    meta = json.loads((EXAMPLES / "collapse_observer" / "ontos.json").read_text())
+    summary = verify_stream_gravity(
+        run / "ontos.stream", 13, expected=GravityContract.from_metadata(meta)
+    )
+    assert summary["mismatch_count"] > 0
+    assert any(
+        m["field"].startswith("contract_") for m in summary["mismatches"]
+    )

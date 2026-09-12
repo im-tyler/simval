@@ -53,7 +53,8 @@ def test_reference_version_gate_rejects_missing(tmp_path):
 
 def test_all_shipped_references_parse_under_version_gate():
     all_cases = load_all()
-    assert len(all_cases) >= 15
+    # 14 after benzene_hydration_fep was retired (FEP-001, AUDIT.md §G).
+    assert len(all_cases) >= 14
     assert all(c.reference_version.startswith("0.1.") for c in all_cases.values())
 
 

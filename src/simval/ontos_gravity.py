@@ -1341,7 +1341,13 @@ def check_zoom_policy(records, seed: int, offset: int, *, cli_events=None) -> Di
     cli_events: optional iterable of (tick, region, level) events scheduled
     via --demote-at/--promote-at; they are interleaved with policy events
     in stream order and excluded from the policy expectation.
+
+    The comparison is over multisets, not membership sets: the expected
+    sequence is policy events + requested CLI events, each exactly once,
+    and a duplicated (or dropped) RegionLevel record fails (audit ONT-008).
     """
+    from collections import Counter
+
     stream_events = []
     pending = []
     last_tick = 0
@@ -1355,21 +1361,16 @@ def check_zoom_policy(records, seed: int, offset: int, *, cli_events=None) -> Di
             pending.clear()
             last_tick = tick
     policy = expected_zoom_policy(seed, offset, last_tick, cli_events=cli_events)
-    policy_set = set(policy)
-    cli_set = set(cli_events or [])
-    ok = True
-    detail = {"stream_events": len(stream_events), "policy_events": len(policy)}
-    for ev in stream_events:
-        if ev in policy_set or ev in cli_set:
-            continue
-        ok = False
-        detail["unexpected"] = ev
-        break
-    for ev in policy:
-        if ev not in stream_events:
-            ok = False
-            detail["missing"] = ev
-            break
+    expected = Counter(policy) + Counter(cli_events or [])
+    got = Counter(stream_events)
+    ok = got == expected
+    detail = {
+        "stream_events": len(stream_events),
+        "policy_events": len(policy),
+    }
+    if not ok:
+        detail["missing"] = sorted((expected - got).elements())[:4]
+        detail["unexpected"] = sorted((got - expected).elements())[:4]
     return DiagnosticResult(
         name="ontos_zoom_policy",
         passed=ok,
@@ -1708,12 +1709,19 @@ class GravityContract:
             if level not in (0, 1, 2):
                 raise ValueError(f"ontos.json event level {level} not in {{0,1,2}}")
             events.append((t, ry * 2 + rx, level))
+        observer = opt_int("observer", 0)
+        ticks = opt_int("ticks", 1)
+        if observer is not None and ticks is None:
+            # The observer zoom policy is evaluated over the requested
+            # horizon; without it the event schedule cannot be checked
+            # (audit ONT-008).
+            raise ValueError("ontos.json observer runs must carry ticks")
         test_ic = meta.get("test_ic")
         if test_ic is not None and test_ic not in ("wallshot", "coarsehit"):
             raise ValueError(f"ontos.json test_ic {test_ic!r} not in ('wallshot', 'coarsehit')")
         return cls(
             body_count=opt_int("bodies", 1),
-            ticks=opt_int("ticks", 1),
+            ticks=ticks,
             events=None if events is None else tuple(events),
             contacts=opt_bool("contacts"),
             radial=opt_bool("radial"),
@@ -1722,7 +1730,7 @@ class GravityContract:
             restitution=opt_float("restitution", 0.0, 1.0),
             friction=opt_float("friction", 0.0, float("inf")),
             walls=opt_bool("walls"),
-            observer=opt_int("observer", 0),
+            observer=observer,
             test_ic=test_ic,
         )
 
@@ -1779,7 +1787,21 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None, *, expect
 
             want = Counter(expected.events)
             got = Counter(observed_events)
-            for ev in sorted(want - got):
+            if expected.observer is None:
+                expected_total = want
+            else:
+                # With an observer the deterministic zoom policy contributes
+                # its own events (which may legitimately repeat per policy),
+                # so the stream multiset must equal policy + requested
+                # exactly — a duplicated RegionLevel record must not pass
+                # (audit ONT-008).
+                expected_total = Counter(
+                    expected_zoom_policy(
+                        seed, expected.observer, expected.ticks,
+                        cli_events=expected.events,
+                    )
+                ) + want
+            for ev in sorted(expected_total - got):
                 mismatches.append(
                     {
                         "tick": ev[0],
@@ -1788,16 +1810,15 @@ def verify_stream_gravity(path, seed: int, profile: str | None = None, *, expect
                         "actual": None,
                     }
                 )
-            if expected.observer is None:
-                for ev in sorted(got - want):
-                    mismatches.append(
-                        {
-                            "tick": ev[0],
-                            "field": "contract_unscheduled_event",
-                            "expected": None,
-                            "actual": ev,
-                        }
-                    )
+            for ev in sorted(got - expected_total):
+                mismatches.append(
+                    {
+                        "tick": ev[0],
+                        "field": "contract_unscheduled_event",
+                        "expected": None,
+                        "actual": ev,
+                    }
+                )
 
     world = GravityWorld(seed, body_count, profile)
     reference = GravityWorld(seed, body_count, profile)
