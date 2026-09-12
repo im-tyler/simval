@@ -262,6 +262,7 @@ class GravityWorld:
         self.shells_enabled = False
         self.contacts = False
         self.contact_params = False
+        self.contact_armed = False
         self.restitution = 0.0
         self.friction = 0.0
         self.walls = False
@@ -917,6 +918,15 @@ class GravityWorld:
         e = self.restitution
         fr = self.friction
         extended = self.contact_params
+        # Section 21 activation rule (audit ONT-013): the touching set's
+        # record-suppression semantics are live only from the first pass
+        # AFTER a Contact record has been emitted. Until then every
+        # impulse-producing overlap records — the run's first
+        # trajectory-changing impulse is never silent, so a record-only
+        # verifier replaying gravity-only up to the first record's tick
+        # reproduces the run exactly (a verifier's own touching history
+        # also begins at the first record).
+        suppress = self.contact_armed
         n = len(self.bodies)
         nxt = set()
         events = []
@@ -983,7 +993,7 @@ class GravityWorld:
                 else:
                     _, jn = self._static_impulse(i, nx, ny, vrx, vry)
                     mu = (mi * mj) / (mi + mj)
-                if pair in self.touching:
+                if suppress and pair in self.touching:
                     continue
                 # The contactant is measured at its post-impulse state for
                 # fine pairs and at its (frozen) polynomial evaluation for
@@ -1045,7 +1055,7 @@ class GravityWorld:
                     cy = (self.bodies[i]["y"] + rec["com_y"]) * 0.5
                     _, jn = self._static_impulse(i, nx, ny, vrx, vry)
                     mu = (mi * rec["mass"]) / (mi + rec["mass"])
-                    if pair in self.touching:
+                    if suppress and pair in self.touching:
                         continue
                     vn_after = (rec["vcom_x"] - self.bodies[i]["vx"]) * nx + (
                         rec["vcom_y"] - self.bodies[i]["vy"]
@@ -1104,7 +1114,7 @@ class GravityWorld:
                     if vn >= 0.0:
                         continue
                     vn, jn = self._static_impulse(i, nx, ny, vrx, vry)
-                    if pair in self.touching:
+                    if suppress and pair in self.touching:
                         continue
                     vn_after = (0.0 - self.bodies[i]["vx"]) * nx + (0.0 - self.bodies[i]["vy"]) * ny
                     events.append(
@@ -1120,6 +1130,8 @@ class GravityWorld:
                             "mu": self.bodies[i]["mass"],
                         }
                     )
+        if events:
+            self.contact_armed = True
         self.touching = nxt
         self.last_contacts.extend(events)
 

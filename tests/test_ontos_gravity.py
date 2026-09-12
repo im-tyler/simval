@@ -284,6 +284,39 @@ def test_re_demote_excludes_collapsed_bodies_from_membership():
     assert w.coarse[0] is None, "collapsed body never joins a window"
 
 
+# --- ONT-013: suppression activates at the first recorded contact ---
+
+
+def test_first_impulse_records_after_silent_overlap():
+    # Seed 416 reproducer (--mode gravity --contacts --seed 416 --bodies
+    # 2): the pair first overlaps while receding, joining the touching
+    # set without a record, and the first trajectory-changing impulse at
+    # tick 13 must still emit the stream's first Contact record —
+    # suppression activates only from the first recorded contact onward.
+    # Before the fix the tick-13 impulse applied silently and the run
+    # diverged from gravity-only with zero records.
+    w = GravityWorld(416, 2)
+    w.contacts = True
+    while w.tick < 12:
+        w.step()
+        assert not w.last_contacts, f"no impulse before tick 13 (tick {w.tick})"
+        w.last_contacts.clear()
+    w.step()
+    assert w.tick == 13
+    assert len(w.last_contacts) == 1, "tick 13 impulse produces the first Contact record"
+    c = w.last_contacts[0]
+    assert (c["a"], c["b"], c["tick"]) == (0, 1, 13)
+    assert c["jn"] > 0.0
+    assert (0, 1) in w.touching
+    assert w.contact_armed, "suppression live from the next pass"
+    w.last_contacts.clear()
+    # The pair is now in the touching set: a same-pass-ordered re-approach
+    # at the next tick stays silent, matching the post-activation
+    # semantics a verifier replays.
+    w.step()
+    assert w.touching == {(0, 1)}, "pair remains overlapping"
+
+
 # --- Section 19: collapse and reconstruction ---
 
 
