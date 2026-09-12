@@ -195,7 +195,7 @@ def main(argv=None) -> int:
                 json.dumps({"grid": args.grid, "runs": results, "outliers": ol}, indent=2) + "\n"
             )
             print(f"  results -> {args.out}")
-        clean = all(
+        clean = bool(results) and all(
             "_error" not in r and r.get("mismatch_count", 1) == 0 and not r.get("checks_failed")
             for r in results
         )

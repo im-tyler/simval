@@ -97,7 +97,84 @@ def load_grid(path) -> list[dict]:
         specs = json.loads(text)
     if not isinstance(specs, list) or not all(isinstance(s, dict) for s in specs):
         raise ValueError(f"grid file must be a list of run specs: {grid_path}")
+    if not specs:
+        raise ValueError(f"grid file contains no run specs: {grid_path}")
     return specs
+
+
+def validate_run_names(names: list[str]) -> None:
+    """Reject run names that are not safe plain directory names, and
+    duplicates — before any filesystem mutation happens (audit ORCH-001).
+    Display names never become paths: run directories use internal ids."""
+    seen: set[str] = set()
+    for name in names:
+        candidate = Path(name)
+        if (
+            not name
+            or candidate.is_absolute()
+            or candidate.name != name
+            or "/" in name
+            or "\\" in name
+            or ".." in candidate.parts
+        ):
+            raise ValueError(
+                f"unsafe grid run name {name!r}: must be a plain name with no "
+                "separators, '..', or absolute components"
+            )
+        if name in seen:
+            raise ValueError(f"duplicate grid run name {name!r}")
+        seen.add(name)
+
+
+def run_grid(specs, *, ontos_bin=None, workdir=None) -> list[dict]:
+    """Generate + verify every spec sequentially; one result row per run."""
+    binary = find_ontos_bin(ontos_bin)
+    tmp = None
+    if workdir is None:
+        tmp = tempfile.TemporaryDirectory(prefix="simval-grid-")
+        root = Path(tmp.name)
+    else:
+        root = Path(workdir)
+        root.mkdir(parents=True, exist_ok=True)
+    names = [
+        str(s.get("name") or f"run-{i}") if isinstance(s, dict) else f"run-{i}"
+        for i, s in enumerate(specs)
+    ]
+    # Preflight every name before touching the filesystem.
+    validate_run_names(names)
+    try:
+        rows = []
+        for i, raw in enumerate(specs):
+            cell = f"cell-{i:04d}"
+            run_dir = (root / cell).resolve()
+            if root.resolve() not in run_dir.parents:
+                raise ValueError(f"internal cell id escaped the grid root: {run_dir}")
+            row: dict = {"run": names[i], "cell": cell}
+            try:
+                # Normalization lives inside the per-cell failure boundary
+                # (audit ORCH-002): a malformed cell gets an _error row and
+                # the grid continues.
+                spec = normalize_spec(raw, i)
+                if run_dir.exists():
+                    shutil.rmtree(run_dir)
+                gen_wall = generate_run(spec, run_dir, binary)
+                row.update(verify_run(run_dir))
+                row.update(
+                    {
+                        "ticks": spec["ticks"],
+                        "events": len(spec["events"]),
+                        "gen_wall_s": gen_wall,
+                        "wall_s": round(gen_wall + row["verify_wall_s"], 3),
+                    }
+                )
+                row.pop("verify_wall_s", None)
+            except Exception as e:
+                row["_error"] = f"cell {i} ({names[i]}): {e}"[:200]
+            rows.append(row)
+        return rows
+    finally:
+        if tmp is not None:
+            tmp.cleanup()
 
 
 def normalize_spec(spec: dict, index: int = 0) -> dict:
@@ -289,45 +366,6 @@ def verify_run(run_dir) -> dict:
     else:
         row["final_population"] = summary["final_population"]
     return row
-
-
-def run_grid(specs, *, ontos_bin=None, workdir=None) -> list[dict]:
-    """Generate + verify every spec sequentially; one result row per run."""
-    binary = find_ontos_bin(ontos_bin)
-    tmp = None
-    if workdir is None:
-        tmp = tempfile.TemporaryDirectory(prefix="simval-grid-")
-        root = Path(tmp.name)
-    else:
-        root = Path(workdir)
-        root.mkdir(parents=True, exist_ok=True)
-    try:
-        rows = []
-        for i, raw in enumerate(specs):
-            spec = normalize_spec(raw, i)
-            run_dir = root / spec["name"]
-            try:
-                if run_dir.exists():
-                    shutil.rmtree(run_dir)
-                gen_wall = generate_run(spec, run_dir, binary)
-                row = verify_run(run_dir)
-                row.update(
-                    {
-                        "run": spec["name"],
-                        "ticks": spec["ticks"],
-                        "events": len(spec["events"]),
-                        "gen_wall_s": gen_wall,
-                        "wall_s": round(gen_wall + row["verify_wall_s"], 3),
-                    }
-                )
-                row.pop("verify_wall_s", None)
-            except Exception as e:
-                row = {"run": spec["name"], "_error": str(e)[:200]}
-            rows.append(row)
-        return rows
-    finally:
-        if tmp is not None:
-            tmp.cleanup()
 
 
 def tabulate(results) -> str:

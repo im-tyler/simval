@@ -10,30 +10,40 @@ from pathlib import Path
 import pytest
 
 from simval.cli import main
-from simval.orchestrate import outliers, run_grid, tabulate, verify_run
+from simval.orchestrate import load_grid, outliers, run_grid, tabulate, validate_run_names, verify_run
 
-ONTOS_REPO = Path.home() / "Documents" / "Code Projects" / "ontos"
-ONTOS_BIN = ONTOS_REPO / "target" / "release" / "ontos"
+_ONTOS_CANDIDATES = (
+    Path.home() / "Documents" / "Code Projects" / "Sides" / "ontos",
+    Path.home() / "Documents" / "Code Projects" / "ontos",
+)
 
 
 def _ensure_bin() -> Path | None:
     env = os.environ.get("ONTOS_BIN")
     if env and Path(env).exists():
         return Path(env)
-    if ONTOS_BIN.exists():
-        return ONTOS_BIN
-    if shutil.which("cargo") is None or not (ONTOS_REPO / "Cargo.toml").exists():
-        return None
-    subprocess.run(
-        ["cargo", "build", "--release", "--quiet", "--manifest-path", str(ONTOS_REPO / "Cargo.toml")],
-        capture_output=True,
-        text=True,
-    )
-    return ONTOS_BIN if ONTOS_BIN.exists() else None
+    for repo in _ONTOS_CANDIDATES:
+        bin_path = repo / "target" / "release" / "ontos"
+        if bin_path.exists():
+            return bin_path
+        if shutil.which("cargo") is not None and (repo / "Cargo.toml").exists():
+            subprocess.run(
+                ["cargo", "build", "--release", "--quiet", "--manifest-path", str(repo / "Cargo.toml")],
+                capture_output=True,
+                text=True,
+            )
+            if bin_path.exists():
+                return bin_path
+    return None
 
 
 BIN = _ensure_bin()
 requires_bin = pytest.mark.skipif(BIN is None, reason="ontos binary unavailable and cargo build failed")
+
+
+def _cell(workdir, i: int) -> Path:
+    return Path(workdir) / f"cell-{i:04d}"
+
 
 GRID = [
     {"name": "all_fine", "mode": "gravity", "ticks": 40, "seed": 42, "bodies": 8},
@@ -56,15 +66,16 @@ GRID = [
 def test_grid_verifies_clean(tmp_path):
     results = run_grid(GRID, ontos_bin=BIN, workdir=tmp_path)
     assert [r["run"] for r in results] == [s["name"] for s in GRID]
-    for r, spec in zip(results, GRID):
+    for i, (r, spec) in enumerate(zip(results, GRID)):
         assert "_error" not in r, r
         assert r["mismatch_count"] == 0
         assert r["checks_failed"] == 0
         assert r["ticks_verified"] == spec["ticks"]
         assert r["wall_s"] > 0
-        assert (tmp_path / spec["name"] / "ontos.stream").exists()
-        meta = json.loads((tmp_path / spec["name"] / "ontos.json").read_text())
+        assert (_cell(tmp_path, i) / "ontos.stream").exists()
+        meta = json.loads((_cell(tmp_path, i) / "ontos.json").read_text())
         assert meta["seed"] == spec["seed"]
+        assert meta["ticks"] == spec["ticks"]
     collapse = results[3]
     assert collapse["collapse_events"] == 1
     assert collapse["expand_events"] == 1
@@ -81,11 +92,11 @@ def test_grid_verifies_clean(tmp_path):
 def test_tampered_stream_reports_mismatch(tmp_path):
     results = run_grid(GRID[:2], ontos_bin=BIN, workdir=tmp_path)
     assert all(r["mismatch_count"] == 0 for r in results)
-    stream = tmp_path / "all_fine" / "ontos.stream"
+    stream = _cell(tmp_path, 0) / "ontos.stream"
     data = bytearray(stream.read_bytes())
     data[-1] ^= 0x01
     stream.write_bytes(bytes(data))
-    row = verify_run(tmp_path / "all_fine")
+    row = verify_run(_cell(tmp_path, 0))
     assert row["mismatch_count"] > 0
     assert row["checks_failed"] > 0
 
@@ -205,3 +216,82 @@ def test_ontos_json_life_events_persisted():
     meta = _ontos_json(spec)
     assert meta["mode"] == "life"
     assert meta["events"] == [["demote", 1, 0]]
+
+
+# --- ORCH-001/002/003: safe names, per-cell failure isolation, empty grids ---
+
+
+def _dummy_bin(tmp_path) -> Path:
+    bin_path = tmp_path / "ontos-dummy"
+    bin_path.write_text("#!/bin/sh\nexit 0\n")
+    bin_path.chmod(0o755)
+    return bin_path
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["../escape", "/tmp/absolute", "a/b", "..", "."],
+)
+def test_unsafe_run_names_rejected_before_execution(tmp_path, name):
+    sentinel = tmp_path / "outside.txt"
+    sentinel.write_text("precious")
+    grid = [{"name": name, "mode": "gravity", "ticks": 5}]
+    with pytest.raises(ValueError, match="unsafe grid run name"):
+        run_grid(grid, ontos_bin=_dummy_bin(tmp_path), workdir=tmp_path / "work")
+    assert sentinel.read_text() == "precious"
+    assert not (tmp_path / "work").exists() or not any((tmp_path / "work").iterdir())
+
+
+def test_duplicate_run_names_rejected_before_execution(tmp_path):
+    grid = [
+        {"name": "same", "mode": "gravity", "ticks": 5},
+        {"name": "same", "mode": "gravity", "ticks": 6},
+    ]
+    with pytest.raises(ValueError, match="duplicate grid run name"):
+        run_grid(grid, ontos_bin=_dummy_bin(tmp_path), workdir=tmp_path / "work")
+
+
+def test_validate_run_names_accepts_plain_names():
+    validate_run_names(["all_fine", "run-1", "window_42"])
+    with pytest.raises(ValueError):
+        validate_run_names(["ok", "../escape"])
+    with pytest.raises(ValueError):
+        validate_run_names(["dup", "dup"])
+
+
+@requires_bin
+def test_malformed_cell_isolated_and_grid_continues(tmp_path):
+    grid = [
+        {"name": "good1", "mode": "gravity", "ticks": 10, "seed": 42, "bodies": 4},
+        {"name": "bad", "mode": "nonsense"},
+        {"name": "good2", "mode": "gravity", "ticks": 10, "seed": 43, "bodies": 4},
+    ]
+    results = run_grid(grid, ontos_bin=BIN, workdir=tmp_path)
+    assert len(results) == 3
+    assert "_error" not in results[0] and results[0]["mismatch_count"] == 0
+    assert "_error" in results[1] and "cell 1" in results[1]["_error"]
+    assert "_error" not in results[2] and results[2]["mismatch_count"] == 0
+    assert (_cell(tmp_path, 2) / "ontos.stream").exists()
+
+
+def test_load_grid_rejects_empty_list(tmp_path):
+    grid = tmp_path / "empty.json"
+    grid.write_text("[]")
+    with pytest.raises(ValueError, match="no run specs"):
+        load_grid(grid)
+
+
+def test_cli_empty_grid_exits_nonzero(tmp_path, capsys):
+    grid = tmp_path / "empty.json"
+    grid.write_text("[]")
+    rc = main(["orchestrate", "--grid", str(grid), "--ontos-bin", str(_dummy_bin(tmp_path))])
+    assert rc == 1
+    out = capsys.readouterr().out + capsys.readouterr().err
+    assert "no run specs" in out
+
+
+def test_cli_success_requires_rows(tmp_path, capsys):
+    # A grid that loads but produces zero rows can never report success.
+    from simval.cli import main as cli_main
+
+    assert cli_main(["orchestrate", "--grid", "does-not-exist.json"]) == 1
