@@ -18,7 +18,7 @@
       0.05
     ],
     "overlap_min_eigenvalue": [
-      "abs",
+      "min",
       0.05
     ],
     "uncertainty_kT": [
