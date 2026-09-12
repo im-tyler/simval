@@ -1,4 +1,7 @@
 import numpy as np
+from pathlib import Path
+
+import pytest
 
 from simval.diagnostics.energy import check_energy_drift
 from simval.fixtures import drifting_energy_series, good_energy_series
@@ -138,3 +141,79 @@ def test_optional_dependency_absence_is_explicit_skip(monkeypatch, tmp_path):
     assert not any(r.name == "charge_state" and not r.passed for r in results)
     assert "charge_state" in ctx.skipped
     assert "optional dependency" in ctx.skipped["charge_state"]
+
+
+# --- IO-001: unique input selection + consumed-input provenance ---
+
+
+def test_two_candidate_trajectories_rejected(tmp_path):
+    # Filesystem-order dependent first-match used to pick one silently.
+    from simval.context import GromacsEngine
+
+    run = tmp_path / "amb"
+    run.mkdir()
+    (run / "a.xtc").write_bytes(b"0")
+    (run / "b.xtc").write_bytes(b"0")
+    (run / "conf.gro").write_bytes(b"0")
+    with pytest.raises(ValueError, match="ambiguous trajectory"):
+        GromacsEngine().load_context(run, selection="protein")
+
+
+def test_two_topologies_rejected(tmp_path):
+    from simval.context import GromacsEngine
+
+    run = tmp_path / "amb"
+    run.mkdir()
+    (run / "a.gro").write_bytes(b"0")
+    (run / "b.pdb").write_bytes(b"0")
+    (run / "traj.xtc").write_bytes(b"0")
+    with pytest.raises(ValueError, match="ambiguous topology"):
+        GromacsEngine().load_context(run, selection="protein")
+
+
+def test_manifest_hashes_all_consumed_synthetic_inputs(tmp_path):
+    import numpy as np
+
+    from simval.fixtures import make_run_dir
+    from simval.manifest import verify_manifest, write_manifest
+    from simval.pipeline import diagnose
+
+    run = make_run_dir(tmp_path / "good", good=True)
+    manifest = diagnose(run)
+    hashed = set(manifest["files"])
+    assert hashed >= {
+        str(run / "energy.npy"),
+        str(run / "positions.npy"),
+        str(run / "reference.npy"),
+        str(run / "params.json"),
+    }
+    out = tmp_path / "prov.json"
+    write_manifest(manifest, out)
+    assert verify_manifest(out)["ok"] is True
+
+    np.save(run / "positions.npy", np.zeros((4, 3, 3)))  # tamper a consumed input
+    tampered = verify_manifest(out)
+    assert tampered["ok"] is False
+    assert str(run / "positions.npy") in tampered["tampered"]
+
+
+def test_artifact_paths_canonically_sorted(tmp_path):
+    from simval.fixtures import make_run_dir
+    from simval.pipeline import diagnose
+
+    run = make_run_dir(tmp_path / "s", good=True)
+    manifest = diagnose(run)
+    assert list(manifest["files"]) == sorted(manifest["files"])
+
+
+def test_ontos_run_tracks_stream_and_meta_inputs(tmp_path):
+    import shutil
+
+    from simval.context import select_engine
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(
+        Path(__file__).parent.parent / "examples" / "ontos" / "r_pentomino", run
+    )
+    ctx = select_engine(run).load_context(run, selection="default")
+    assert {p.name for p in ctx.consumed_inputs} == {"ontos.stream", "ontos.json"}

@@ -35,11 +35,19 @@ class RunContext:
     run_params: dict[str, Any] = field(default_factory=dict)
     skipped: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
+    # Every input file actually consumed while loading this run; the
+    # provenance manifest hashes all of them (audit IO-001).
+    consumed_inputs: list[Path] = field(default_factory=list)
 
 
 def _find(run: Path, *patterns: str):
     from simval._util import find_files
     return find_files(run, *patterns)
+
+
+def _find_unique(run: Path, *patterns: str, what: str = "input"):
+    from simval._util import find_unique
+    return find_unique(run, *patterns, what=what)
 
 
 class EngineAdapter:
@@ -64,18 +72,20 @@ class SyntheticEngine(EngineAdapter):
     def load_context(self, run: Path, selection: str) -> RunContext:
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
 
-        e = _find(run, "energy.npy")
+        e = _find_unique(run, "energy.npy", what="energy series")
         if e is not None:
             ctx.energy = np.load(e)
             ctx.run_params["n_energy_samples"] = int(ctx.energy.size)
+            ctx.consumed_inputs.append(e)
 
-        pos = _find(run, "positions.npy")
-        ref = _find(run, "reference.npy")
+        pos = _find_unique(run, "positions.npy", what="positions trajectory")
+        ref = _find_unique(run, "reference.npy", what="reference positions")
         if pos is not None and ref is not None:
             ctx.positions = np.load(pos)
             ctx.reference = np.load(ref)
             ctx.run_params["n_frames"] = int(ctx.positions.shape[0])
             ctx.run_params["n_atoms"] = int(ctx.positions.shape[1])
+            ctx.consumed_inputs += [pos, ref]
 
         sys_atoms_p = run / "atom_types.txt"
         ff_p = run / "ff_atom_types.txt"
@@ -83,12 +93,14 @@ class SyntheticEngine(EngineAdapter):
             ctx.system_atom_types = [line.strip() for line in sys_atoms_p.read_text().splitlines() if line.strip()]
             ctx.ff_param_types = [line.strip() for line in ff_p.read_text().splitlines() if line.strip()]
             ctx.run_params["n_system_atom_types"] = len(set(ctx.system_atom_types))
+            ctx.consumed_inputs += [sys_atoms_p, ff_p]
 
         params_path = run / "params.json"
         if params_path.exists():
             from simval.units import Quantity
             raw = json.loads(params_path.read_text())
             ctx.params = {k: Quantity(v["value"], v["unit"]) for k, v in raw.items()}
+            ctx.consumed_inputs.append(params_path)
         return ctx
 
 
@@ -106,10 +118,11 @@ class GromacsEngine(EngineAdapter):
         ctx.run_params["engine"] = "gromacs"
         ctx.run_params["selection"] = selection
 
-        top = _find(run, "*.gro", "*.pdb", "*.prmtop", "*.psf", "*.tpr")
-        xtc = _find(run, "*.xtc", "*.dcd", "*.trr", "*.nc")
+        top = _find_unique(run, "*.gro", "*.pdb", "*.prmtop", "*.psf", "*.tpr", what="topology")
+        xtc = _find_unique(run, "*.xtc", "*.dcd", "*.trr", "*.nc", what="trajectory")
         ctx.trajectory_path = xtc
         if top and xtc:
+            ctx.consumed_inputs += [top, xtc]
             ctx.positions, ctx.reference, ctx.atom_names = io.load_trajectory(xtc, top, selection=selection)
             ctx.run_params["n_frames"] = int(ctx.positions.shape[0])
             ctx.run_params["n_selected_atoms"] = int(ctx.positions.shape[1])
@@ -128,39 +141,48 @@ class GromacsEngine(EngineAdapter):
                 # pipeline as a failing per_residue_rmsf error (PIPE-001).
                 ctx.extra["ca_load_error"] = f"{type(e).__name__}: {e}"[:200]
 
-        ctx.tpr_path = _find(run, "*.tpr")
+        ctx.tpr_path = _find_unique(run, "*.tpr", what="run topology (tpr)")
         if ctx.tpr_path is not None:
             ctx.system_atom_types = io.load_atom_types(ctx.tpr_path, selection=selection) or None
             if ctx.system_atom_types:
                 ctx.run_params["n_system_atom_types"] = len(set(ctx.system_atom_types))
+                ctx.consumed_inputs.append(ctx.tpr_path)
 
         ff_p = run / "ff_atom_types.txt"
         if ff_p.exists():
             ctx.ff_param_types = [line.strip() for line in ff_p.read_text().splitlines() if line.strip()]
+            ctx.consumed_inputs.append(ff_p)
 
-        ctx.structure_path = _find(run, "*.gro", "*.pdb")
+        ctx.structure_path = _find_unique(run, "*.gro", "*.pdb", what="structure")
 
-        xvg = _find(run, "*.xvg")
+        xvg = _find_unique(run, "*.xvg", what="energy file (xvg)")
         if xvg is not None:
             term, arr = io.load_preferred_energy(xvg)
             ctx.energy = arr
             ctx.run_params["energy_term"] = term
             ctx.run_params["n_energy_samples"] = int(ctx.energy.size)
+            ctx.consumed_inputs.append(xvg)
 
         params_path = run / "params.json"
         if params_path.exists():
             raw = json.loads(params_path.read_text())
             ctx.params = {k: Quantity(v["value"], v["unit"]) for k, v in raw.items()}
             ctx.run_params["params"] = raw
+            ctx.consumed_inputs.append(params_path)
 
-        mdp = _find(run, "mdout.mdp", "*.mdp")
-        top_top = _find(run, "*.top")
+        mdp = _find_unique(run, "mdout.mdp", "*.mdp", what="run parameters (mdp)")
+        top_top = _find_unique(run, "*.top", what="topology file (top)")
+        if mdp is not None:
+            ctx.consumed_inputs.append(mdp)
+        if top_top is not None:
+            ctx.consumed_inputs.append(top_top)
         methods_file = run / "methods.json"
         if methods_file.exists():
             md = __import__("json").loads(methods_file.read_text())
             ctx.metadata = md
             ctx.run_params["force_field"] = md.get("force_field")
             ctx.run_params["water_model"] = md.get("water")
+            ctx.consumed_inputs.append(methods_file)
         else:
             meta = meta_mod.build_metadata(mdp, top_top, gmx_version=_gmx_version())
             ctx.metadata = meta

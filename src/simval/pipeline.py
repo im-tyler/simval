@@ -183,6 +183,11 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
 
 
 def _artifact_files(ctx: RunContext) -> list[str]:
+    """Canonical (sorted) artifact list: every input the engine actually
+    consumed when one is tracked, else the legacy glob fallback (audit
+    IO-001)."""
+    if ctx.consumed_inputs:
+        return sorted({str(p) for p in ctx.consumed_inputs})
     run = ctx.run_dir
     out = []
     for pat in ("*.xtc", "*.gro", "*.pdb", "*.tpr", "*.xvg", "*.mdp",
@@ -190,7 +195,7 @@ def _artifact_files(ctx: RunContext) -> list[str]:
         hit = next(run.glob(pat), None)
         if hit:
             out.append(str(hit))
-    return out
+    return sorted(out)
 
 
 def diagnose(run_dir, *, out: str = "provenance.json", selection: str = "protein",

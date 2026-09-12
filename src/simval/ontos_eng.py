@@ -83,6 +83,10 @@ class OntosEngine(EngineAdapter):
         if declared == "life" and gravity_stream:
             raise ValueError("ontos.json declares mode=life but ontos.stream is version 2")
         ctx = RunContext(run_dir=run, engine=self.name, selection=selection)
+        ctx.consumed_inputs.append(run / "ontos.stream")
+        ctx.consumed_inputs.append(run / "ontos.json")
+        if (run / "ontos.wav").exists():
+            ctx.consumed_inputs.append(run / "ontos.wav")
         if gravity_stream:
             from simval.ontos_gravity import (
                 check_collapse_energy,

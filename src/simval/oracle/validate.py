@@ -44,9 +44,10 @@ def compute_metrics(run_dir, *, selection: str = "protein and name CA") -> dict:
 
 def _md_metrics(run: Path, selection: str) -> dict:
     from simval import io
+    from simval._util import find_unique
 
-    top = _find(run, "*.gro", "*.pdb", "*.prmtop", "*.psf", "*.tpr")
-    xtc = _find(run, "*.xtc", "*.dcd", "*.trr", "*.nc")
+    top = find_unique(run, "*.gro", "*.pdb", "*.prmtop", "*.psf", "*.tpr", what="topology")
+    xtc = find_unique(run, "*.xtc", "*.dcd", "*.trr", "*.nc", what="trajectory")
     if not (top and xtc):
         raise FileNotFoundError(f"run-dir {run} needs a trajectory (.xtc/.dcd/.trr/.nc) and topology (.gro/.pdb/.prmtop/.psf/.tpr)")
 
@@ -68,7 +69,7 @@ def _md_metrics(run: Path, selection: str) -> dict:
         "final_rg_nm": float(rg_per_frame[-1]),
     }
 
-    xvg = _find(run, "*.xvg")
+    xvg = find_unique(run, "*.xvg", what="energy file (xvg)")
     if xvg:
         from simval.diagnostics import energy as energy_mod
         _term, e = io.load_preferred_energy(xvg)
