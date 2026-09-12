@@ -3,7 +3,8 @@
 > **Register note (2026-09-11):** §A–E below are the historical planning audit
 > (pre-rename; kept verbatim). The verification-oracle audit register — the
 > authoritative record of oracle-hardening findings against HEAD 7495370 —
-> is §F at the bottom of this file.
+> is §F at the bottom of this file. Batch 2 (HEAD 0bdb2d3) is §G; batch 3
+> (HEAD 74e8ee6) is §H.
 
 > Synthesis of five independent analysis passes: competitive positioning, technical architecture, risk/oversight hunt, Hive codebase audit, product/UX/scope.
 > Convergent findings (flagged by ≥2 passes) are high-confidence. The audit's own conclusion is in §D.
@@ -250,3 +251,46 @@ Deliberate test-behavior updates (each locked in the old behavior):
   `final_energy_hartree` (stale since the §F rename, only visible with
   pyscf installed).
 
+
+---
+
+## H. Verification-oracle audit register, batch 3 (2026-09-12)
+
+Findings verified against HEAD `74e8ee6` by an external review; implemented
+in the commits below. Same posture as §F/§G: simval is the trust anchor,
+every fix errs toward failing closed. The six ONT findings were producer
+bugs mirrored into the reference: the corrected semantics live in the
+ontos clone at `usestemframework/ontos` befff49 (OTO-002/003/008/009/012/
+013/014 there), and the reference plus its corpus now track those.
+
+| ID | Severity | Area | Finding | Status |
+|---|---|---|---|---|
+| ONT-010 | P0 | ontos_gravity.expected_zoom_policy | Promotion arm fired for any non-Fine mode (`modes != 0`), so the observer zoom policy expanded a Collapsed region | Fixed — promotion gates on Coarse only (`modes == 1`); a collapsed region leaves collapse solely via an explicit expansion event. Corpus resync below |
+| ONT-011 | P0 | ontos_gravity.GravityWorld | Refit detection scanned surviving member Fits for `entering == t0 + WINDOW`: an empty demotion armed nothing (region stayed Coarse forever) and foreign-window absorption (section 26 collapse consuming the donor's last Fit) stalled the donor's re-fit | Fixed — per-region `region_window_deadline` armed on every demotion (empty ones included) and on every re-fit that keeps members; consumed at refit execution; cleared on promote, collapse and expansion (mirrors ontos 555cecd/d8aa3e1) |
+| ONT-012 | P0 | ontos_gravity.GravityWorld._demote | Re-demotion reselected membership without touching the region's existing Fits, so a stale out-of-box member Fit survived past its own validity window | Fixed — every Fit owned by the region is materialized into bodies and cleared at t0 before membership is recomputed (collapsed bodies excluded, the section 14 rule) and the new window fitted (mirrors ontos 7546061) |
+| ONT-013 | P0 | ontos_gravity._contact_pass | Touching-based record suppression consulted the initially-empty touching set from pass 1, so the run's first trajectory-changing impulse could be silent | Fixed — `contact_armed` latch: False initially, suppression consulted only when armed, armed after a pass emits at least one Contact (mirrors ontos e733200). Seed-416 reproducer locked in as a test |
+| ONT-014 | P0 | ontos_gravity.step | Level transitions applied without invalidating touching — fresh-contact-on-return-to-Fine suppressed, including same-boundary Fine->non-Fine->Fine (demote+promote, expand+recollapse) | Fixed — changed members accumulate after EACH individual transition (scheduled events and window refits), their touching entries drop before the contact pass, and a collapsed region's monopole pseudo-ids drop whenever the region leaves collapse during the boundary (mirrors ontos 5a45877/13d7d1d) |
+| ONT-015 | P0 | ontos_gravity._contact_pass | Wall guards combined overlap && approach and bailed before inserting into the next touching set, so a receding-but-overlapping body dropped its wall key and re-approach emitted a duplicate contact beginning | Fixed — the wall pair enters the next touching set on ANY overlap; the approach test gates only the impulse/record (mirrors ontos 38cf8a3, spec section 24) |
+| GOLD-002 | P0 | oracle/cases.py, references/MANIFEST.json (new), scripts/ | Reference JSONs trusted as-is; `source_hash` lived inside the same mutable file | Fixed — `references/MANIFEST.json` pins each golden's canonical-content sha256 (sorted keys, compact separators: layout edits inert, content edits detected); `_load()`/`load_all()` verify before use and fail closed naming the mismatched case; an unpinned golden inside references/ is rejected; a pinned name is verified wherever the file lives. Trust model documented honestly in `_load_manifest`: the manifest is itself the pinned artifact — tampering requires editing two coordinated files in one commit. `scripts/regen_reference_manifest.py` regenerates it deliberately (refuses name/stem mismatches and duplicate names) |
+| IO-003 | P0 | io.py, context.py, pipeline.py, oracle/validate.py | Non-numeric xvg data rows silently discarded; a ragged numeric table raised ValueError which GromacsEngine labeled energy-check-not-applicable | Fixed — malformed non-directive data raises `XvgParseError` with line/column context, ragged rows name both lines; the genuinely-missing-label case raises the narrow typed `ConservedEnergyColumnMissing` — the only path that may become an explicit skip. Parse/shape failures surface as a failing `energy_drift` diagnostic (FF-001 pattern) and the oracle metric path no longer swallows them |
+
+Golden/reference/corpus files touched in batch 3, and why:
+
+- `references/MANIFEST.json` — NEW (GOLD-002): canonical-content pins for
+  all 14 shipped goldens, generated by `scripts/regen_reference_manifest.py`.
+- `examples/ontos_gravity/collapse_observer/{ontos.stream,ontos.json,provenance.json}`
+  — regenerated from the corrected ontos clone at befff49 (ONT-010): the
+  seed-13/observer-42/collapse-at-40 run no longer carries the wrong
+  tick-49 promotion of collapsed region 0. The regenerated stream carries
+  the section 20 RegionMultipole record (ontos CLI default), so the
+  example metadata moves to `multipole: true` and it leaves the legacy
+  pre-spec-20 set (`collapse`, seed 11, remains). No other corpus stream
+  changed: all six corrected behaviors are byte-identical on every other
+  committed corpus run (the emitter-reproduction tests pin this), matching
+  the ontos-side golden analysis.
+- `tests/test_ontos_gravity.py::test_legacy_section19_examples_still_verify`
+  — collapse_observer removed from the legacy pair (deliberate; it is now
+  a section 20 corpus run).
+- `tests/test_reference_rules.py` version-gate and identity fixtures —
+  renamed their synthetic cases to probe names so the GOLD-002 pin does
+  not shadow the validation under test (deliberate test update).
