@@ -438,7 +438,10 @@ def life_contract_problems(meta: dict, summary: dict, records: list) -> list[str
     """Validate a life run's ontos.json metadata against the stream.
 
     Shared by the engine adapter and the standalone CLI so both paths
-    enforce the same run contract (audit ONT-007/009).
+    enforce the same run contract (audit ONT-007/009). Untimed life events
+    are initialization semantics: every requested event must sit in the
+    boundary before TickHeader 1 — an occurrence at any later boundary is
+    a contract violation even though the event identity and count match.
     """
     problems = []
     meta_ticks = meta.get("ticks")
@@ -446,6 +449,15 @@ def life_contract_problems(meta: dict, summary: dict, records: list) -> list[str
         problems.append(
             f"ontos.json ticks={meta_ticks} but stream verified {summary['ticks_verified']} ticks"
         )
+    placements: list[tuple[int, tuple]] = []
+    pending: list[tuple] = []
+    for record in records:
+        if record[0] == "level":
+            pending.append((record[1], record[2], record[3]))
+        elif record[0] == "tick":
+            for key in pending:
+                placements.append((record[1], key))
+            pending.clear()
     if "events" in meta:
         from collections import Counter
 
@@ -459,11 +471,18 @@ def life_contract_problems(meta: dict, summary: dict, records: list) -> list[str
                 problems.append(f"ontos.json life event region ({rx},{ry}) outside the 2x2 grid")
                 continue
             want[(rx, ry, _LIFE_EVENT_KINDS[kind])] += 1
-        got = Counter((r[1], r[2], r[3]) for r in records if r[0] == "level")
+        got = Counter(key for _, key in placements)
         for key in sorted((want - got).elements()):
             problems.append(f"missing scheduled event {key}")
         for key in sorted((got - want).elements()):
             problems.append(f"unscheduled event {key} in stream")
+        for tick, key in placements:
+            if tick != 1:
+                problems.append(
+                    f"event {key} at the boundary before tick {tick}: "
+                    "requested untimed life events are initialization semantics "
+                    "and must precede tick 1"
+                )
     return problems
 
 

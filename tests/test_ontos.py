@@ -413,3 +413,83 @@ def test_life_contract_event_mismatch_fails(tmp_path):
     results = run_checks(ctx)
     contract = next((r for r in results if r.name == "ontos_run_contract"), None)
     assert contract is not None and not contract.passed
+
+
+# --- ONT-009: untimed life events must initialize (before tick 1) ---
+
+
+def test_life_event_at_later_boundary_fails_contract(tmp_path):
+    # Move the second scheduled demote from the initialization boundary to
+    # the boundary before tick 3: identity and count still match, placement
+    # must fail the contract.
+    data = bytearray((R_PENTOMINO / "ontos.stream").read_bytes())
+    sizes = {1: 9, 2: 9, 3: 17, 4: 10, 5: 34}
+    off = 16
+    level_offsets = []
+    frame_index = 0
+    frame_starts = []
+    while off < len(data):
+        tag = data[off]
+        if tag == 4:
+            level_offsets.append(off)
+        if tag == 1:
+            frame_starts.append(off)
+            frame_index += 1
+        off += sizes[tag]
+    assert len(level_offsets) == 2 and len(frame_starts) >= 3
+    second_level = bytes(data[level_offsets[1] : level_offsets[1] + 10])
+    after_removal = bytes(data[: level_offsets[1]]) + bytes(data[level_offsets[1] + 10 :])
+    # The boundary before tick 3 shifted left by one 10-byte record.
+    insert_at = frame_starts[2] - 10
+    mutated = after_removal[:insert_at] + second_level + after_removal[insert_at:]
+    p = tmp_path / "moved.stream"
+    p.write_bytes(mutated)
+
+    from simval.ontos import parse_stream, verify_stream
+    from simval.ontos import life_contract_problems
+
+    _, records = parse_stream(p)
+    summary = verify_stream(p, 42)
+    meta = json.loads((R_PENTOMINO / "ontos.json").read_text())
+    problems = life_contract_problems(meta, summary, records)
+    assert any("must precede tick 1" in p_ for p_ in problems), problems
+
+
+def test_life_event_placement_clean_fixture_has_no_problems():
+    from simval.ontos import life_contract_problems, parse_stream, verify_stream
+
+    for fixture in ("r_pentomino", "promote_roundtrip", "all_fine"):
+        run = EXAMPLES / fixture
+        _, records = parse_stream(run / "ontos.stream")
+        summary = verify_stream(run / "ontos.stream", 42 if fixture != "all_fine" else 7)
+        meta = json.loads((run / "ontos.json").read_text())
+        assert life_contract_problems(meta, summary, records) == [], fixture
+
+
+def test_life_event_at_later_boundary_fails_engine_checks(tmp_path):
+    import shutil
+
+    run = tmp_path / "ontos_run"
+    shutil.copytree(R_PENTOMINO, run)
+    data = bytearray((run / "ontos.stream").read_bytes())
+    sizes = {1: 9, 2: 9, 3: 17, 4: 10, 5: 34}
+    off = 16
+    level_offsets = []
+    frame_starts = []
+    while off < len(data):
+        tag = data[off]
+        if tag == 4:
+            level_offsets.append(off)
+        if tag == 1:
+            frame_starts.append(off)
+        off += sizes[tag]
+    second_level = bytes(data[level_offsets[1] : level_offsets[1] + 10])
+    after_removal = bytes(data[: level_offsets[1]]) + bytes(data[level_offsets[1] + 10 :])
+    insert_at = frame_starts[2] - 10
+    (run / "ontos.stream").write_bytes(
+        after_removal[:insert_at] + second_level + after_removal[insert_at:]
+    )
+    ctx = OntosEngine().load_context(run, selection="default")
+    results = run_checks(ctx)
+    contract = next((r for r in results if r.name == "ontos_run_contract"), None)
+    assert contract is not None and not contract.passed
