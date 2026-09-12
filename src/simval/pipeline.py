@@ -159,6 +159,7 @@ def run_checks(ctx: RunContext, thresholds: dict | None = None) -> list:
         results.append(fep.check_hysteresis(ctx.extra["u_nk"], ctx.extra.get("u_nk_reverse")))
 
     if "scf_energies" in ctx.extra:
+        results.append(pyscf_eng.check_scf_converged(ctx.extra["converged"]))
         results.append(pyscf_eng.check_scf_convergence(ctx.extra["scf_energies"]))
         results.append(pyscf_eng.check_energy_sane(
             ctx.extra["final_energy"], ctx.extra["n_electrons"]))

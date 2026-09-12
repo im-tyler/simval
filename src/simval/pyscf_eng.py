@@ -86,6 +86,24 @@ def check_scf_convergence(energies_per_cycle, *, threshold: float = 1e-6) -> Dia
     )
 
 
+def check_scf_converged(converged: bool) -> DiagnosticResult:
+    """The solver's own convergence flag is a mandatory verdict (audit
+    PYS-001): `mf.converged` False fails regardless of how small the final
+    energy delta looks — a stalled cycle sequence can still flatten."""
+    ok = bool(converged)
+    return DiagnosticResult(
+        name="scf_converged",
+        passed=ok,
+        threshold=1.0,
+        value=1.0 if ok else 0.0,
+        detail={
+            "converged": ok,
+            "rule": "the SCF solver's convergence flag is mandatory; "
+            "converged=False fails regardless of the final energy delta",
+        },
+    )
+
+
 def check_energy_sane(final_energy, n_electrons, *, floor: float = 0.0) -> DiagnosticResult:
     """Sanity check: the HF/DFT total energy of a bound molecule is a large
     negative number. A non-negative total energy signals a broken calculation

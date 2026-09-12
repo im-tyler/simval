@@ -68,6 +68,9 @@ def test_h2_reference_case_exists_and_matches_fresh_run():
     assert case.engine == "qc-pyscf"
     data = run_scf(EXAMPLE / "molecule.json")
     assert data["final_energy"] == pytest.approx(
-        case.reference_metrics["final_energy"], abs=1e-10
+        case.reference_metrics["final_energy_hartree"], abs=1e-10
     )
     assert data["n_electrons"] == case.reference_metrics["n_electrons"]
+    # PYS-001: the golden requires the solver's convergence flag (exact).
+    assert case.reference_metrics["converged"] == 1.0
+    assert data["converged"] is True

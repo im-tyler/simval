@@ -143,6 +143,56 @@ def test_optional_dependency_absence_is_explicit_skip(monkeypatch, tmp_path):
     assert "optional dependency" in ctx.skipped["charge_state"]
 
 
+# --- PYS-001: solver convergence is a mandatory, verdict-bearing check ---
+# Stub pattern: the pyscf engine module imports pyscf lazily, so these
+# pipeline-wiring tests run without the optional dependency installed.
+
+
+def test_scf_converged_flag_check_passes_and_fails():
+    from simval.pyscf_eng import check_scf_converged
+
+    ok = check_scf_converged(True)
+    assert ok.passed and ok.name == "scf_converged"
+    bad = check_scf_converged(False)
+    assert not bad.passed and bad.value == 0.0
+
+
+def test_unconverged_scf_fails_pipeline_regardless_of_delta():
+    from simval.pipeline import run_checks
+
+    ctx = _ctx()
+    # A flat energy sequence (final delta 0.0) with converged=False: the
+    # delta check passes, the mandatory flag check must still fail.
+    ctx.extra = {
+        "scf_energies": [-1.1167593073964255, -1.1167593073964255],
+        "final_energy": -1.1167593073964255,
+        "n_electrons": 2,
+        "converged": False,
+    }
+    results = run_checks(ctx)
+    by_name = {r.name: r for r in results}
+    assert by_name["scf_convergence"].passed is True
+    assert by_name["scf_converged"].passed is False
+    assert by_name["energy_sane"].passed is True
+    assert build_manifest({}, results)["verdict"] == "fail"
+
+
+def test_converged_scf_passes_pipeline_checks():
+    from simval.pipeline import run_checks
+
+    ctx = _ctx()
+    ctx.extra = {
+        "scf_energies": [-1.1167593073964255, -1.1167593073964255],
+        "final_energy": -1.1167593073964255,
+        "n_electrons": 2,
+        "converged": True,
+    }
+    results = run_checks(ctx)
+    assert all(
+        r.passed for r in results if r.name.startswith("scf_") or r.name == "energy_sane"
+    )
+
+
 # --- IO-001: unique input selection + consumed-input provenance ---
 
 
