@@ -1137,7 +1137,32 @@ class GravityWorld:
 
     def step(self) -> None:
         entering = self.tick + 1
+        n = len(self.bodies)
+        # Section 21 (audit ONT-014): a pair leaves the touching set when
+        # either member crosses the Fine/non-Fine boundary at any point
+        # during the boundary (demote, promote, collapse, expansion,
+        # refit thaw), even if the body ends the boundary back at its
+        # starting status (e.g. demote+promote or expand+recollapse on
+        # one tick), so a body that is Fine again while still overlapping
+        # begins a fresh contact. Marks accumulate per applied
+        # transition, not from final-vs-initial membership. A coarse
+        # body moving between coarse regions (e.g. absorbed into a
+        # foreign collapse) stays non-Fine and keeps its keys. Pseudo-id
+        # keys of a collapsed region drop when the region leaves
+        # collapse during the boundary, even if it re-collapses.
+        status = [self.coarse[i] is None and self.body_collapsed[i] is None for i in range(n)]
+        left_fine = [False] * n
+        left_collapse = [False] * 4
+
+        def mark_fine_moves() -> None:
+            for i in range(n):
+                fine = self.coarse[i] is None and self.body_collapsed[i] is None
+                if fine != status[i]:
+                    left_fine[i] = True
+                    status[i] = fine
+
         for region, level in self.events.pop(entering, []):
+            was_collapsed = self.region_collapsed[region] is not None
             if level == 0:
                 if self.region_collapsed[region] is None:
                     self._demote(region, entering)
@@ -1148,6 +1173,9 @@ class GravityWorld:
                     self._promote(region, entering)
             elif self.region_collapsed[region] is None:
                 self._collapse(region, entering)
+            if was_collapsed and self.region_collapsed[region] is None:
+                left_collapse[region] = True
+            mark_fine_moves()
         for region in range(4):
             if (
                 self.region_coarse[region]
@@ -1155,8 +1183,26 @@ class GravityWorld:
                 and self.region_window_deadline[region] == entering
             ):
                 self._refit(region, entering)
+                mark_fine_moves()
 
-        n = len(self.bodies)
+        if self.touching and (any(left_fine) or any(left_collapse)):
+
+            def _pair_kept(pair):
+                a, b = pair
+                if (
+                    MONOPOLE_BASE <= b < WALL_BASE
+                    and (b - MONOPOLE_BASE) < 4
+                    and left_collapse[b - MONOPOLE_BASE]
+                ):
+                    return False
+                if a < n and left_fine[a]:
+                    return False
+                if b < MONOPOLE_BASE and b < n and left_fine[b]:
+                    return False
+                return True
+
+            self.touching = {pair for pair in self.touching if _pair_kept(pair)}
+
         coarse = [self.coarse[i] is not None for i in range(n)]
         frozen = [coarse[i] or self.body_collapsed[i] is not None for i in range(n)]
         monopoles = [

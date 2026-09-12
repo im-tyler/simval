@@ -317,6 +317,78 @@ def test_first_impulse_records_after_silent_overlap():
     assert w.touching == {(0, 1)}, "pair remains overlapping"
 
 
+# --- ONT-014: touching invalidated at every fine-membership transition ---
+
+
+def test_same_tick_demote_promote_invalidates_touching():
+    # Invalidation follows applied transitions, not final membership. A
+    # body demoted and re-promoted within one boundary keeps no stale
+    # touching keys, so the still-overlapping pair begins a fresh contact
+    # (record + impulse) even though its Fine status at the pass equals
+    # the status before the boundary.
+    w = GravityWorld(11, 2)
+    w.bodies[0]["mass"] = 2.0
+    w.bodies[0]["x"] = 62.0
+    w.bodies[0]["y"] = 32.0
+    w.bodies[0]["vx"] = 0.0
+    w.bodies[0]["vy"] = 0.0
+    w.bodies[1]["mass"] = 2.0
+    w.bodies[1]["x"] = 66.0
+    w.bodies[1]["y"] = 32.0
+    w.bodies[1]["vx"] = 0.0
+    w.bodies[1]["vy"] = 0.0
+    w.contacts = True
+    w.contact_params = True
+    w.schedule(2, 1, 0)
+    w.schedule(2, 1, 1)
+    w.step()
+    assert len(w.last_contacts) == 1, "contact begins at tick 1"
+    w.last_contacts.clear()
+    w.step()
+    assert len(w.last_contacts) == 1, "demote+promote in one boundary still invalidates the pair"
+    c = w.last_contacts[0]
+    assert (c["a"], c["b"]) == (0, 1)
+    assert c["jn"] > 0.0, "impulse fires and records"
+
+
+def test_same_tick_expand_recollapse_invalidates_monopole_touching():
+    # A region that expands and re-collapses within one boundary must
+    # drop its monopole pseudo-id touching keys, so a fine body still
+    # overlapping the reborn monopole begins a fresh contact. Final
+    # region mode (Collapsed) equals the pre-boundary mode, so a
+    # final-vs-initial derivation kept the stale key and suppressed the
+    # record forever after.
+    w = GravityWorld(11, 5)
+    for slot, i in enumerate(range(1, 5)):
+        w.bodies[i]["x"] = 66.0 + float(slot % 2)
+        w.bodies[i]["y"] = 96.0 + float(slot // 2)
+        w.bodies[i]["vx"] = 0.0
+        w.bodies[i]["vy"] = 0.0
+    w.bodies[0]["x"] = 63.5
+    w.bodies[0]["y"] = 96.0
+    w.bodies[0]["vx"] = 0.5
+    w.bodies[0]["vy"] = 0.0
+    w.contacts = True
+    w.contact_params = True
+    w.schedule(1, 3, 2)
+    w.schedule(3, 3, 1)
+    w.schedule(3, 3, 2)
+    w.step()
+
+    def monopole_records(world):
+        return [c for c in world.last_contacts if c["b"] == MONOPOLE_BASE + 3]
+
+    assert len(monopole_records(w)) == 1, "monopole contact begins at tick 1"
+    w.last_contacts.clear()
+    w.step()
+    assert len(monopole_records(w)) == 0, "unchanged boundary stays silent"
+    w.last_contacts.clear()
+    w.step()
+    recs = monopole_records(w)
+    assert len(recs) == 1, "expand+recollapse in one boundary invalidates the pseudo key"
+    assert recs[0]["jn"] > 0.0
+
+
 # --- Section 19: collapse and reconstruction ---
 
 
