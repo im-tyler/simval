@@ -35,6 +35,7 @@ def test_no_undeclared_ignores_in_shipped_references():
 def test_reference_version_gate_rejects_unsupported(tmp_path):
     src = cases_mod._REFERENCES_DIR / "adk_morph.json"
     d = json.loads(src.read_text())
+    d["name"] = "future_version_probe"  # not a shipped reference: no manifest pin
     d["reference_version"] = "99.0.0"
     path = tmp_path / "future.json"
     path.write_text(json.dumps(d))
@@ -45,6 +46,7 @@ def test_reference_version_gate_rejects_unsupported(tmp_path):
 def test_reference_version_gate_rejects_missing(tmp_path):
     src = cases_mod._REFERENCES_DIR / "adk_morph.json"
     d = json.loads(src.read_text())
+    d["name"] = "noversion_probe"  # not a shipped reference: no manifest pin
     del d["reference_version"]
     path = tmp_path / "noversion.json"
     path.write_text(json.dumps(d))
@@ -179,6 +181,7 @@ def test_every_shipped_golden_carries_identity():
 def test_golden_without_identity_fails_closed(tmp_path):
     src = cases_mod._REFERENCES_DIR / "wave_pulse_stable.json"
     d = json.loads(src.read_text())
+    d["name"] = "noidentity_probe"  # not a shipped reference: no manifest pin
     del d["identity"]
     path = tmp_path / "noidentity.json"
     path.write_text(json.dumps(d))
@@ -189,11 +192,13 @@ def test_golden_without_identity_fails_closed(tmp_path):
 def test_golden_with_malformed_identity_rejected(tmp_path):
     src = cases_mod._REFERENCES_DIR / "wave_pulse_stable.json"
     d = json.loads(src.read_text())
+    d["name"] = "badhash_probe"  # not a shipped reference: no manifest pin
     d["identity"] = {"wave.json": "not-a-hash"}
     path = tmp_path / "badhash.json"
     path.write_text(json.dumps(d))
     with pytest.raises(ValueError, match="sha256"):
         cases_mod._load(path)
+    d["name"] = "empty_probe"
     d["identity"] = {}
     path = tmp_path / "empty.json"
     path.write_text(json.dumps(d))
@@ -237,3 +242,104 @@ def test_validate_undeclared_scenario_input_fails_closed(tmp_path):
     result = validate(run, "fep_synthetic")
     assert result.passed is False
     assert result.detail["identity"]["__undeclared_inputs__"]["problem"] == ["extra.csv"]
+
+
+# --- GOLD-002: shipped goldens are pinned by an independent manifest ---
+
+
+def test_manifest_covers_exactly_the_shipped_references():
+    manifest = cases_mod._load_manifest()
+    shipped = set(cases_mod.list_cases())
+    assert shipped, "no shipped references found"
+    assert set(manifest) == shipped
+
+
+def test_unmodified_references_load():
+    # Every shipped golden loads through the manifest-verified path.
+    cases = load_all()
+    assert cases
+    assert all(c.source_hash is not None for c in cases.values())
+
+
+def test_tampered_tolerance_rejected_without_manifest_update(tmp_path, monkeypatch):
+    # A tolerance loosened in a shipped golden without regenerating the
+    # manifest must fail closed at load, naming the case.
+    import shutil
+
+    refs = tmp_path / "references"
+    refs.mkdir()
+    shipped = sorted(cases_mod._REFERENCES_DIR.glob("*.json"))
+    for p in shipped:
+        shutil.copy(p, refs / p.name)
+    monkeypatch.setattr(cases_mod, "_REFERENCES_DIR", refs)
+    victim = refs / "wave_pulse_stable.json"
+    d = json.loads(victim.read_text())
+    d["tolerances"]["cfl"] = ["max", 99.0]
+    victim.write_text(json.dumps(d, indent=2))
+    with pytest.raises(ValueError, match="wave_pulse_stable.*does not match the pinned MANIFEST"):
+        cases_mod._load(victim)
+
+
+def test_layout_only_edit_is_inert(tmp_path, monkeypatch):
+    # The pin covers canonical content, not file layout: re-indenting a
+    # golden without touching content must still load.
+    import shutil
+
+    refs = tmp_path / "references"
+    refs.mkdir()
+    for p in sorted(cases_mod._REFERENCES_DIR.glob("*.json")):
+        shutil.copy(p, refs / p.name)
+    monkeypatch.setattr(cases_mod, "_REFERENCES_DIR", refs)
+    victim = refs / "wave_pulse_stable.json"
+    d = json.loads(victim.read_text())
+    victim.write_text(json.dumps(d, indent=4, sort_keys=False))
+    case = cases_mod._load(victim)
+    assert case.name == "wave_pulse_stable"
+
+
+def test_shipped_file_without_manifest_entry_fails_closed(tmp_path, monkeypatch):
+    import shutil
+
+    refs = tmp_path / "references"
+    refs.mkdir()
+    for p in sorted(cases_mod._REFERENCES_DIR.glob("*.json")):
+        shutil.copy(p, refs / p.name)
+    manifest = json.loads((refs / "MANIFEST.json").read_text())
+    del manifest["wave_pulse_stable"]
+    (refs / "MANIFEST.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr(cases_mod, "_REFERENCES_DIR", refs)
+    with pytest.raises(ValueError, match="no MANIFEST.json entry pins its content"):
+        cases_mod._load(refs / "wave_pulse_stable.json")
+
+
+def test_missing_manifest_fails_closed(tmp_path, monkeypatch):
+    import shutil
+
+    refs = tmp_path / "references"
+    refs.mkdir()
+    for p in sorted(cases_mod._REFERENCES_DIR.glob("*.json")):
+        if p.name == "MANIFEST.json":
+            continue
+        shutil.copy(p, refs / p.name)
+    monkeypatch.setattr(cases_mod, "_REFERENCES_DIR", refs)
+    with pytest.raises(ValueError, match="manifest"):
+        cases_mod._load(refs / "wave_pulse_stable.json")
+
+
+def test_malformed_manifest_entry_fails_closed(tmp_path, monkeypatch):
+    import shutil
+
+    refs = tmp_path / "references"
+    refs.mkdir()
+    for p in sorted(cases_mod._REFERENCES_DIR.glob("*.json")):
+        shutil.copy(p, refs / p.name)
+    manifest = json.loads((refs / "MANIFEST.json").read_text())
+    manifest["wave_pulse_stable"] = "not-a-hash"
+    (refs / "MANIFEST.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr(cases_mod, "_REFERENCES_DIR", refs)
+    with pytest.raises(ValueError, match="manifest entries must be lowercase sha256"):
+        cases_mod._load(refs / "wave_pulse_stable.json")
+
+
+def test_manifest_not_listed_as_a_case():
+    assert "MANIFEST" not in cases_mod.list_cases()
