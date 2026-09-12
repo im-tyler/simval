@@ -18,12 +18,12 @@
       0.001
     ],
     "tau": [
-      "abs",
+      "interval",
+      0.5,
       2.0
     ],
     "tau_in_range": [
-      "abs",
-      0.5
+      "exact"
     ]
   }
 }

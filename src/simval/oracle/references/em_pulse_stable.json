@@ -14,12 +14,15 @@
   "source_hash": "",
   "tolerances": {
     "courant": [
-      "abs",
+      "max",
       1.0
     ],
     "em_energy_growth": [
-      "abs",
+      "max",
       1.25
+    ],
+    "n_steps": [
+      "exact"
     ]
   }
 }

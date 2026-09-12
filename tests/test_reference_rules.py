@@ -85,3 +85,49 @@ def test_compare_metrics_ignore_exempts_metric():
     out = compare_metrics({}, ref, ignore=["n_frames"])
     assert out["__passed__"] is True
     assert out["n_frames"]["tol_kind"] == "ignore"
+
+
+# --- ORA-002: bounds are bounds, not distances from the golden ---
+
+
+def _case_tols(name):
+    return load_all()[name].tolerances
+
+
+def test_wave_cfl_ceiling_rejects_supercritical():
+    # The old abs-1.0 rule let CFL 1.4 pass against a 0.5 golden.
+    ref = {"cfl": 0.5, "energy_growth": 1.007, "n_steps": 2000}
+    tols = _case_tols("wave_pulse_stable")
+    bad = compare_metrics({"cfl": 1.4, "energy_growth": 1.007, "n_steps": 2000}, ref, tols)
+    assert bad["cfl"]["passed"] is False
+    ok = compare_metrics({"cfl": 0.99, "energy_growth": 1.007, "n_steps": 2000}, ref, tols)
+    assert ok["cfl"]["passed"] is True
+    assert ok["__passed__"] is True
+
+
+def test_em_courant_ceiling_rejects_supercritical():
+    ref = {"courant": 0.7071, "em_energy_growth": 1.014, "n_steps": 800}
+    tols = _case_tols("em_pulse_stable")
+    bad = compare_metrics({"courant": 1.2, "em_energy_growth": 1.0, "n_steps": 800}, ref, tols)
+    assert bad["courant"]["passed"] is False
+    assert bad["em_energy_growth"]["passed"] is True  # 1.0 is bounded energy, not drift
+
+
+def test_bound_kinds_require_finite_candidates():
+    ref = {"cfl": 0.5}
+    out = compare_metrics(
+        {"cfl": float("nan")}, ref, {"cfl": ["max", 1.0]}
+    )
+    assert out["cfl"]["passed"] is False
+    out = compare_metrics({"cfl": float("inf")}, ref, {"cfl": ["max", 1.0]})
+    assert out["cfl"]["passed"] is False
+    out = compare_metrics({"p": float("nan")}, {"p": 0.99}, {"p": ["min", 0.9]})
+    assert out["p"]["passed"] is False
+
+
+def test_interval_and_min_bounds():
+    assert compare_metrics({"tau": 0.8}, {"tau": 0.8}, {"tau": ["interval", 0.5, 2.0]})["tau"]["passed"]
+    assert not compare_metrics({"tau": 2.8}, {"tau": 0.8}, {"tau": ["interval", 0.5, 2.0]})["tau"]["passed"]
+    assert not compare_metrics({"tau": 0.3}, {"tau": 0.8}, {"tau": ["interval", 0.5, 2.0]})["tau"]["passed"]
+    assert compare_metrics({"p": 0.9999}, {"p": 0.9999}, {"p": ["min", 0.9]})["p"]["passed"]
+    assert not compare_metrics({"p": 0.5}, {"p": 0.9999}, {"p": ["min", 0.9]})["p"]["passed"]

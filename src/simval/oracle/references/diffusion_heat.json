@@ -11,5 +11,10 @@
   "selection": "n/a",
   "source": "examples/diffusion/heat",
   "source_hash": "",
-  "tolerances": {}
+  "tolerances": {
+    "fourier": [
+      "max",
+      0.5
+    ]
+  }
 }

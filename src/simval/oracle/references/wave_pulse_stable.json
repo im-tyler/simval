@@ -14,12 +14,15 @@
   "source_hash": "",
   "tolerances": {
     "cfl": [
-      "abs",
+      "max",
       1.0
     ],
     "energy_growth": [
-      "abs",
+      "max",
       1.25
+    ],
+    "n_steps": [
+      "exact"
     ]
   }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -273,6 +274,15 @@ def _within(kind, candidate, reference, tol):
         return abs(candidate - reference) / denom <= tol
     if kind == "abs":
         return abs(candidate - reference) <= tol
+    if kind == "max":
+        # Physical ceiling: candidate must be finite and at or below the bound.
+        return math.isfinite(candidate) and candidate <= tol
+    if kind == "min":
+        # Physical floor: candidate must be finite and at or above the bound.
+        return math.isfinite(candidate) and candidate >= tol
+    if kind == "interval":
+        lo, hi = tol
+        return math.isfinite(candidate) and lo <= candidate <= hi
     raise ValueError(f"unknown tolerance kind: {kind}")
 
 
@@ -317,12 +327,13 @@ def compare_metrics(
                 "add a tolerance rule or declare it in the case's ignore list"
             )
         if metric not in candidate:
+            spec = tols[metric]
             out[metric] = {
                 "reference": ref_val,
                 "candidate": None,
                 "delta_rel": None,
-                "tol_kind": tols[metric][0],
-                "tol": tols[metric][1] if len(tols[metric]) > 1 else None,
+                "tol_kind": spec[0],
+                "tol": list(spec[1:3]) if spec[0] == "interval" else (spec[1] if len(spec) > 1 else None),
                 "passed": False,
                 "error": "missing from candidate",
             }
@@ -330,14 +341,17 @@ def compare_metrics(
             continue
         kind = tols[metric][0]
         cand_val = candidate[metric]
-        passed = _within(kind, cand_val, ref_val, tols[metric][1] if len(tols[metric]) > 1 else None)
+        tol = tols[metric][1] if len(tols[metric]) > 1 else None
+        if kind == "interval":
+            tol = tuple(tols[metric][1:3])
+        passed = _within(kind, cand_val, ref_val, tol)
         denom = abs(ref_val) + 1e-12
         out[metric] = {
             "reference": ref_val,
             "candidate": cand_val,
             "delta_rel": float(abs(cand_val - ref_val) / denom) if kind != "exact" else (0.0 if passed else 1.0),
             "tol_kind": kind,
-            "tol": tols[metric][1] if len(tols[metric]) > 1 else None,
+            "tol": list(tol) if kind == "interval" else tol,
             "passed": bool(passed),
         }
         all_pass = all_pass and passed
