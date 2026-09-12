@@ -126,8 +126,17 @@ def validate_run_names(names: list[str]) -> None:
         seen.add(name)
 
 
-def run_grid(specs, *, ontos_bin=None, workdir=None) -> list[dict]:
-    """Generate + verify every spec sequentially; one result row per run."""
+def run_grid(specs, *, ontos_bin=None, workdir=None, cell_timeout_s: float = 1800.0) -> list[dict]:
+    """Generate + verify every spec sequentially; one result row per run.
+
+    cell_timeout_s bounds each ontos invocation (a hung producer must not
+    hang the grid): on expiry the child is killed and the cell records an
+    `_error` row; there are NO implicit retries (audit ORCH-004).
+    """
+    import math
+
+    if not (isinstance(cell_timeout_s, (int, float)) and math.isfinite(cell_timeout_s) and cell_timeout_s > 0):
+        raise ValueError(f"cell_timeout_s must be a finite positive number, got {cell_timeout_s!r}")
     binary = find_ontos_bin(ontos_bin)
     tmp = None
     if workdir is None:
@@ -157,7 +166,7 @@ def run_grid(specs, *, ontos_bin=None, workdir=None) -> list[dict]:
                 spec = normalize_spec(raw, i)
                 if run_dir.exists():
                     shutil.rmtree(run_dir)
-                gen_wall = generate_run(spec, run_dir, binary)
+                gen_wall = generate_run(spec, run_dir, binary, timeout_s=cell_timeout_s)
                 row.update(verify_run(run_dir))
                 row.update(
                     {
@@ -294,16 +303,26 @@ def _cli_args(spec: dict, stream_path: Path) -> list[str]:
     return args
 
 
-def generate_run(spec: dict, run_dir: Path, ontos_bin) -> float:
-    """Run the ontos binary for one spec into run_dir (ontos.stream + ontos.json)."""
+def generate_run(spec: dict, run_dir: Path, ontos_bin, *, timeout_s: float | None = None) -> float:
+    """Run the ontos binary for one spec into run_dir (ontos.stream + ontos.json).
+
+    timeout_s bounds the invocation: on expiry subprocess kills the child
+    and TimeoutExpired is re-raised as a per-cell error. No retries (audit
+    ORCH-004) — the caller records the failure and moves on."""
     run_dir.mkdir(parents=True, exist_ok=True)
     stream_path = run_dir / "ontos.stream"
     start = time.perf_counter()
-    proc = subprocess.run(
-        [str(ontos_bin)] + _cli_args(spec, stream_path),
-        capture_output=True,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            [str(ontos_bin)] + _cli_args(spec, stream_path),
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"ontos did not finish within {timeout_s}s (killed; no retry)"
+        ) from e
     wall = time.perf_counter() - start
     if proc.returncode != 0:
         raise RuntimeError(f"ontos exited {proc.returncode}: {proc.stderr.strip()[:200]}")

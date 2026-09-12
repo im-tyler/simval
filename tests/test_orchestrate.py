@@ -295,3 +295,105 @@ def test_cli_success_requires_rows(tmp_path, capsys):
     from simval.cli import main as cli_main
 
     assert cli_main(["orchestrate", "--grid", "does-not-exist.json"]) == 1
+
+
+# --- ORCH-004: a hung producer is killed, isolated, and never retried ---
+
+
+def _write_fake_ontos(path: Path) -> Path:
+    src = str(Path(__file__).parent.parent / "src")
+    script = f'''#!/usr/bin/env python3
+import struct
+import sys
+import time
+
+sys.path.insert(0, r"{src}")
+
+from pathlib import Path
+
+from simval.ontos_gravity import GravityWorld
+
+LEVELS = {{"--demote-at": 0, "--promote-at": 1, "--collapse-at": 2, "--expand-at": 1}}
+
+
+def emit_gravity(seed, bodies, ticks, schedule, out):
+    world = GravityWorld(seed, bodies)
+    buf = bytearray(b"ONTO") + struct.pack("<IIII", 2, 128, 128, bodies)
+    events = {{}}
+    for t, region, level in schedule:
+        world.schedule(t, region, level)
+        events.setdefault(t, []).append((region, level))
+    for _ in range(ticks):
+        entering = world.tick + 1
+        for region, level in events.get(entering, []):
+            buf += b"\\x04" + struct.pack("<IIB", region % 2, region // 2, level)
+        world.step()
+        buf += b"\\x01" + struct.pack("<Q", world.tick)
+        buf += b"\\x02" + struct.pack("<Q", bodies)
+        fine, coarse_n, mass, px, py, energy = world.totals()
+        buf += b"\\x07" + struct.pack("<QQQdddd", world.tick, fine, coarse_n, mass, px, py, energy)
+        for rx, ry in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            level, pop, rhash = world.region_hash(ry * 2 + rx)
+            buf += b"\\x05" + struct.pack("<QIIBQQ", world.tick, rx, ry, level, pop, rhash)
+        for i in range(bodies):
+            b, region, level = world.emitted_state(i)
+            buf += b"\\x06" + struct.pack(
+                "<QIBBddddd", world.tick, i, region, level,
+                b["x"], b["y"], b["vx"], b["vy"], b["mass"])
+    Path(out).write_bytes(bytes(buf))
+
+
+def main(argv):
+    seed, ticks, bodies, out, schedule = 42, 20, 8, None, []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--ticks":
+            ticks = int(argv[i + 1]); i += 2
+        elif a == "--seed":
+            seed = int(argv[i + 1]); i += 2
+        elif a == "--bodies":
+            bodies = int(argv[i + 1]); i += 2
+        elif a == "--out":
+            out = argv[i + 1]; i += 2
+        elif a in LEVELS:
+            t, rx, ry = int(argv[i + 1]), int(argv[i + 2]), int(argv[i + 3])
+            schedule.append((t, ry * 2 + rx, LEVELS[a])); i += 4
+        else:
+            i += 2 if argv[i].startswith("--") else 1
+    if seed == 999:
+        time.sleep(60)
+    emit_gravity(seed, bodies, ticks, schedule, out)
+
+
+main(sys.argv[1:])
+'''
+    path.write_text(script)
+    path.chmod(0o755)
+    return path
+
+
+def test_hung_cell_times_out_isolated_and_grid_continues(tmp_path):
+    fake = _write_fake_ontos(tmp_path / "fake-ontos")
+    specs = [
+        {"name": "ok_a", "mode": "gravity", "ticks": 20, "seed": 42, "bodies": 8},
+        {"name": "hung", "mode": "gravity", "ticks": 20, "seed": 999, "bodies": 8},
+        {"name": "ok_b", "mode": "gravity", "ticks": 20, "seed": 7, "bodies": 8},
+    ]
+    results = run_grid(
+        specs, ontos_bin=fake, workdir=tmp_path / "grid", cell_timeout_s=5.0
+    )
+    assert len(results) == 3
+    assert "_error" not in results[0]
+    assert results[0]["mismatch_count"] == 0
+    assert "did not finish within 5.0s" in results[1]["_error"]
+    assert "no retry" in results[1]["_error"]
+    assert "_error" not in results[2], results[2]
+    assert results[2]["mismatch_count"] == 0
+    assert results[2]["ticks_verified"] == 20
+
+
+def test_run_grid_rejects_bad_timeout(tmp_path):
+    fake = _write_fake_ontos(tmp_path / "fake-ontos")
+    with pytest.raises(ValueError, match="cell_timeout_s"):
+        run_grid([], ontos_bin=fake, workdir=tmp_path, cell_timeout_s=0.0)

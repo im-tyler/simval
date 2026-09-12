@@ -53,6 +53,11 @@ def main(argv=None) -> int:
     orc.add_argument("--grid", required=True, help="JSON (or YAML) list of run specs; format in simval.orchestrate")
     orc.add_argument("--ontos-bin", default=None, help="path to the ontos binary (default: $ONTOS_BIN or PATH)")
     orc.add_argument("--out", default=None, help="write the results dict as JSON to this path")
+    orc.add_argument(
+        "--cell-timeout", type=float, default=1800.0, dest="cell_timeout_s", metavar="SECONDS",
+        help="per-cell ontos invocation timeout in seconds (default 1800; expiry kills the "
+        "child and records an _error row — no retries)",
+    )
 
     vm = sub.add_parser("verify-manifest", help="re-hash files; confirm they match a provenance.json")
     vm.add_argument("manifest")
@@ -177,7 +182,9 @@ def main(argv=None) -> int:
         specs = _safe(lambda: load_grid(args.grid))
         if specs is None:
             return 1
-        results = _safe(lambda: run_grid(specs, ontos_bin=args.ontos_bin))
+        results = _safe(lambda: run_grid(
+            specs, ontos_bin=args.ontos_bin, cell_timeout_s=args.cell_timeout_s
+        ))
         if results is None:
             return 1
         print(f"simval {__version__} | orchestrate {args.grid} | {len(results)} runs")
